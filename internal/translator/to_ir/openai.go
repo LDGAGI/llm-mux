@@ -83,16 +83,31 @@ func ParseOpenAIRequest(rawJSON []byte) (*ir.UnifiedChatRequest, error) {
 
 	if tools := root.Get("tools"); tools.Exists() && tools.IsArray() {
 		for _, t := range tools.Array() {
-			if gs := t.Get("google_search"); gs.Exists() {
+			toolType := t.Get("type").String()
+
+			// OpenAI official web search: {"type": "web_search_preview"}
+			// Also support variations like "web_search_preview_2025_03_11"
+			if strings.HasPrefix(toolType, "web_search") {
 				if req.Metadata == nil {
 					req.Metadata = make(map[string]any)
 				}
-				var gsValue any
-				if json.Unmarshal([]byte(gs.Raw), &gsValue) == nil {
-					req.Metadata["google_search"] = gsValue
+				// Map to google_search for Gemini backend
+				gsConfig := map[string]any{}
+				// Preserve search_context_size if provided
+				if scs := t.Get("search_context_size"); scs.Exists() {
+					gsConfig["search_context_size"] = scs.String()
 				}
+				// Preserve user_location if provided
+				if ul := t.Get("user_location"); ul.Exists() && ul.IsObject() {
+					var ulVal any
+					if json.Unmarshal([]byte(ul.Raw), &ulVal) == nil {
+						gsConfig["user_location"] = ulVal
+					}
+				}
+				req.Metadata["google_search"] = gsConfig
 				continue
 			}
+
 			if tool := parseOpenAITool(t); tool != nil {
 				req.Tools = append(req.Tools, *tool)
 			}

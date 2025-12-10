@@ -77,6 +77,22 @@ func ParseClaudeRequest(rawJSON []byte) (*ir.UnifiedChatRequest, error) {
 	// Tools
 	if tools := parsed.Get("tools"); tools.Exists() && tools.IsArray() {
 		for _, t := range tools.Array() {
+			toolType := t.Get("type").String()
+			toolName := t.Get("name").String()
+
+			// Handle Claude built-in tools (web_search, computer, etc.)
+			// Official format: {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+			// Also support simple format: {"type": "web_search", "name": "web_search"}
+			if strings.HasPrefix(toolType, "web_search") || toolName == "web_search" {
+				if req.Metadata == nil {
+					req.Metadata = make(map[string]any)
+				}
+				// Map to google_search for Gemini backend
+				req.Metadata["google_search"] = map[string]any{}
+				continue
+			}
+
+			// Regular function tool
 			var params map[string]any
 			if schema := t.Get("input_schema"); schema.Exists() && schema.IsObject() {
 				if err := json.Unmarshal([]byte(schema.Raw), &params); err == nil {
@@ -87,7 +103,7 @@ func ParseClaudeRequest(rawJSON []byte) (*ir.UnifiedChatRequest, error) {
 				params = make(map[string]any)
 			}
 			req.Tools = append(req.Tools, ir.ToolDefinition{
-				Name: t.Get("name").String(), Description: t.Get("description").String(), Parameters: params,
+				Name: toolName, Description: t.Get("description").String(), Parameters: params,
 			})
 		}
 	}

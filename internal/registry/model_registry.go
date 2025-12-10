@@ -91,7 +91,7 @@ type ProviderModelMapping struct {
 }
 
 type ModelRegistry struct {
-	// models maps model ID to registration information
+	// models maps provider:modelID to registration information
 	models map[string]*ModelRegistration
 	// clientModels maps client ID to the models it provides
 	clientModels map[string][]string
@@ -99,6 +99,9 @@ type ModelRegistry struct {
 	clientProviders map[string]string
 	// canonicalIndex maps canonical ID to provider-specific model IDs
 	canonicalIndex map[string][]ProviderModelMapping
+	// modelIDIndex maps bare modelID to list of provider keys (provider:modelID)
+	// for O(1) lookup instead of O(n) iteration
+	modelIDIndex map[string][]string
 	// mutex ensures thread-safe access to the registry
 	mutex *sync.RWMutex
 	// showProviderPrefixes controls whether to add visual provider prefixes to model IDs
@@ -117,6 +120,7 @@ func GetGlobalRegistry() *ModelRegistry {
 			clientModels:         make(map[string][]string),
 			clientProviders:      make(map[string]string),
 			canonicalIndex:       make(map[string][]ProviderModelMapping),
+			modelIDIndex:         make(map[string][]string),
 			mutex:                &sync.RWMutex{},
 			showProviderPrefixes: false,
 		}
@@ -366,6 +370,11 @@ func (r *ModelRegistry) addModelRegistration(modelID, provider string, model *Mo
 	}
 	r.models[providerModelKey] = registration
 
+	// Update modelIDIndex for O(1) lookup (only for provider-prefixed keys)
+	if provider != "" {
+		r.addToModelIDIndex(modelID, providerModelKey)
+	}
+
 	// Update canonical index for cross-provider routing
 	canonicalID := model.CanonicalID
 	if canonicalID == "" {
@@ -409,14 +418,61 @@ func (r *ModelRegistry) removeModelRegistration(clientID, modelID, provider stri
 	}
 	log.Debugf("Decremented count for model %s, now %d clients", providerModelKey, registration.Count)
 	if registration.Count <= 0 {
+		// Clean up canonical index before removing the model
+		if registration.Info != nil {
+			canonicalID := registration.Info.CanonicalID
+			if canonicalID == "" {
+				canonicalID = modelID
+			}
+			r.removeFromCanonicalIndex(canonicalID, provider, modelID)
+		}
+		// Clean up modelIDIndex
+		if provider != "" {
+			r.removeFromModelIDIndex(modelID, providerModelKey)
+		}
 		delete(r.models, providerModelKey)
 		log.Debugf("Removed model %s as no clients remain", providerModelKey)
 	}
 }
 
+// addToModelIDIndex adds a provider key to the modelID index
+func (r *ModelRegistry) addToModelIDIndex(modelID, providerKey string) {
+	if modelID == "" || providerKey == "" {
+		return
+	}
+	// Check if already exists
+	for _, k := range r.modelIDIndex[modelID] {
+		if k == providerKey {
+			return
+		}
+	}
+	r.modelIDIndex[modelID] = append(r.modelIDIndex[modelID], providerKey)
+}
+
+// removeFromModelIDIndex removes a provider key from the modelID index
+func (r *ModelRegistry) removeFromModelIDIndex(modelID, providerKey string) {
+	if modelID == "" || providerKey == "" {
+		return
+	}
+	keys := r.modelIDIndex[modelID]
+	if len(keys) == 0 {
+		return
+	}
+	for i, k := range keys {
+		if k == providerKey {
+			keys[i] = keys[len(keys)-1]
+			r.modelIDIndex[modelID] = keys[:len(keys)-1]
+			if len(r.modelIDIndex[modelID]) == 0 {
+				delete(r.modelIDIndex, modelID)
+			}
+			return
+		}
+	}
+}
+
 // addToCanonicalIndex adds a provider-model mapping to the canonical index
 func (r *ModelRegistry) addToCanonicalIndex(canonicalID, provider, modelID string) {
-	if canonicalID == "" || provider == "" {
+	if canonicalID == "" || provider == "" || modelID == "" {
 		return
 	}
 	// Check if this mapping already exists
@@ -429,6 +485,30 @@ func (r *ModelRegistry) addToCanonicalIndex(canonicalID, provider, modelID strin
 		Provider: provider,
 		ModelID:  modelID,
 	})
+}
+
+// removeFromCanonicalIndex removes a provider-model mapping from the canonical index
+func (r *ModelRegistry) removeFromCanonicalIndex(canonicalID, provider, modelID string) {
+	if canonicalID == "" || provider == "" {
+		return
+	}
+	mappings := r.canonicalIndex[canonicalID]
+	if len(mappings) == 0 {
+		return
+	}
+	// Find and remove the mapping
+	for i, m := range mappings {
+		if m.Provider == provider && m.ModelID == modelID {
+			// Remove by swapping with last element and truncating
+			mappings[i] = mappings[len(mappings)-1]
+			r.canonicalIndex[canonicalID] = mappings[:len(mappings)-1]
+			// Clean up empty canonical entries
+			if len(r.canonicalIndex[canonicalID]) == 0 {
+				delete(r.canonicalIndex, canonicalID)
+			}
+			return
+		}
+	}
 }
 
 // GetProvidersWithModelID returns all providers and their provider-specific model IDs.
@@ -477,18 +557,17 @@ func (r *ModelRegistry) findModelRegistration(modelID string) *ModelRegistration
 		}
 	}
 
-	// Direct lookup
+	// Direct lookup (non-prefixed key)
 	if reg, ok := r.models[modelID]; ok {
 		return reg
 	}
 
-	// Search provider-prefixed keys
-	for key, reg := range r.models {
-		if reg == nil || reg.Count == 0 {
-			continue
-		}
-		if idx := strings.Index(key, ":"); idx > 0 && key[idx+1:] == modelID {
-			return reg
+	// O(1) lookup via modelIDIndex (instead of O(n) loop)
+	if keys, ok := r.modelIDIndex[modelID]; ok && len(keys) > 0 {
+		for _, key := range keys {
+			if reg, ok := r.models[key]; ok && reg != nil && reg.Count > 0 {
+				return reg
+			}
 		}
 	}
 	return nil
@@ -497,18 +576,25 @@ func (r *ModelRegistry) findModelRegistration(modelID string) *ModelRegistration
 // getModelProvidersInternal is the lock-free internal version for use within locked contexts
 func (r *ModelRegistry) getModelProvidersInternal(modelID string) []string {
 	var result []string
-	for key, reg := range r.models {
-		if reg == nil || reg.Count == 0 {
-			continue
+
+	// Direct lookup (non-prefixed key)
+	if reg, ok := r.models[modelID]; ok && reg != nil && reg.Count > 0 {
+		for provider, count := range reg.Providers {
+			if count > 0 {
+				result = append(result, provider)
+			}
 		}
-		if key == modelID {
-			for provider, count := range reg.Providers {
-				if count > 0 {
-					result = append(result, provider)
+	}
+
+	// O(1) lookup via modelIDIndex (instead of O(n) loop)
+	if keys, ok := r.modelIDIndex[modelID]; ok && len(keys) > 0 {
+		for _, key := range keys {
+			if reg, ok := r.models[key]; ok && reg != nil && reg.Count > 0 {
+				// Extract provider from key (format: "provider:modelID")
+				if idx := strings.Index(key, ":"); idx > 0 {
+					result = append(result, key[:idx])
 				}
 			}
-		} else if idx := strings.Index(key, ":"); idx > 0 && key[idx+1:] == modelID {
-			result = append(result, key[:idx])
 		}
 	}
 	return result
@@ -567,7 +653,13 @@ func (r *ModelRegistry) unregisterClientInternal(clientID string) {
 
 	now := time.Now()
 	for _, modelID := range models {
-		if registration, isExists := r.models[modelID]; isExists {
+		// Construct provider-prefixed key to match addModelRegistration
+		providerModelKey := modelID
+		if hasProvider && provider != "" {
+			providerModelKey = provider + ":" + modelID
+		}
+
+		if registration, isExists := r.models[providerModelKey]; isExists {
 			registration.Count--
 			registration.LastUpdated = now
 
@@ -587,12 +679,24 @@ func (r *ModelRegistry) unregisterClientInternal(clientID string) {
 				}
 			}
 
-			log.Debugf("Decremented count for model %s, now %d clients", modelID, registration.Count)
+			log.Debugf("Decremented count for model %s, now %d clients", providerModelKey, registration.Count)
 
 			// Remove model if no clients remain
 			if registration.Count <= 0 {
-				delete(r.models, modelID)
-				log.Debugf("Removed model %s as no clients remain", modelID)
+				// Clean up canonical index before removing the model
+				if registration.Info != nil {
+					canonicalID := registration.Info.CanonicalID
+					if canonicalID == "" {
+						canonicalID = registration.Info.ID
+					}
+					r.removeFromCanonicalIndex(canonicalID, provider, registration.Info.ID)
+				}
+				// Clean up modelIDIndex
+				if hasProvider && provider != "" {
+					r.removeFromModelIDIndex(modelID, providerModelKey)
+				}
+				delete(r.models, providerModelKey)
+				log.Debugf("Removed model %s as no clients remain", providerModelKey)
 			}
 		}
 	}
