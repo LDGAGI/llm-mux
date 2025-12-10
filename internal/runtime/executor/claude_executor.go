@@ -91,7 +91,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		log.Debugf("request error, error status: %d, error body: %s", httpResp.StatusCode, summarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = newCategorizedError(httpResp.StatusCode, string(b), nil)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("response body close error: %v", errClose)
 		}
@@ -184,7 +184,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("response body close error: %v", errClose)
 		}
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = newCategorizedError(httpResp.StatusCode, string(b), nil)
 		return nil, err
 	}
 	decodedBody, err := decodeResponseBody(httpResp.Body, httpResp.Header.Get("Content-Encoding"))
@@ -296,7 +296,7 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 		if errClose := resp.Body.Close(); errClose != nil {
 			log.Errorf("response body close error: %v", errClose)
 		}
-		return cliproxyexecutor.Response{}, statusErr{code: resp.StatusCode, msg: string(b)}
+		return cliproxyexecutor.Response{}, newCategorizedError(resp.StatusCode, string(b), nil)
 	}
 	decodedBody, err := decodeResponseBody(resp.Body, resp.Header.Get("Content-Encoding"))
 	if err != nil {
