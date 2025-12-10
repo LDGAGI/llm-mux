@@ -79,6 +79,10 @@ type apiStats struct {
 	Models        map[string]*modelStats
 }
 
+// maxDetailsPerModel limits the number of request details stored per model
+// to prevent unbounded memory growth. Uses FIFO eviction when limit is reached.
+const maxDetailsPerModel = 1000
+
 // modelStats holds aggregated metrics for a specific model within an API.
 type modelStats struct {
 	TotalRequests int64
@@ -219,6 +223,13 @@ func (s *RequestStatistics) updateAPIStats(stats *apiStats, model string, detail
 	}
 	modelStatsValue.TotalRequests++
 	modelStatsValue.TotalTokens += detail.Tokens.TotalTokens
+
+	// Enforce max capacity with FIFO eviction to prevent unbounded memory growth
+	if len(modelStatsValue.Details) >= maxDetailsPerModel {
+		// Shift slice to remove oldest entry (FIFO)
+		copy(modelStatsValue.Details, modelStatsValue.Details[1:])
+		modelStatsValue.Details = modelStatsValue.Details[:len(modelStatsValue.Details)-1]
+	}
 	modelStatsValue.Details = append(modelStatsValue.Details, detail)
 }
 

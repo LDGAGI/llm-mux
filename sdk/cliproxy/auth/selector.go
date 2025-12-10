@@ -144,7 +144,8 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 	s.mu.Lock()
 	index := s.cursors[key]
 
-	if index >= 2_147_483_640 {
+	// Reset counter if approaching int overflow or if negative (wraparound occurred)
+	if index >= 1_000_000_000 || index < 0 {
 		index = 0
 	}
 

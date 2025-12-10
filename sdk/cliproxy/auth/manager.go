@@ -365,7 +365,7 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 
 		if errStream == nil {
 			// Wrap channel to track completion for stats
-			return m.wrapStreamForStats(chunks, lastProvider, req.Model, start), nil
+			return m.wrapStreamForStats(ctx, chunks, lastProvider, req.Model, start), nil
 		}
 
 		m.recordProviderResult(lastProvider, req.Model, false, time.Since(start))
@@ -386,19 +386,37 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 }
 
 // wrapStreamForStats wraps a stream channel to record stats when complete.
-func (m *Manager) wrapStreamForStats(in <-chan cliproxyexecutor.StreamChunk, provider, model string, start time.Time) <-chan cliproxyexecutor.StreamChunk {
-	out := make(chan cliproxyexecutor.StreamChunk)
+// Uses a buffered channel and non-blocking sends to prevent goroutine leaks
+// when consumers stop reading.
+func (m *Manager) wrapStreamForStats(ctx context.Context, in <-chan cliproxyexecutor.StreamChunk, provider, model string, start time.Time) <-chan cliproxyexecutor.StreamChunk {
+	out := make(chan cliproxyexecutor.StreamChunk, 1)
 	go func() {
 		defer close(out)
 		hasError := false
-		for chunk := range in {
-			if chunk.Err != nil {
-				hasError = true
+		for {
+			select {
+			case <-ctx.Done():
+				// Context cancelled - record as error and exit
+				m.recordProviderResult(provider, model, false, time.Since(start))
+				return
+			case chunk, ok := <-in:
+				if !ok {
+					// Input channel closed - stream complete
+					m.recordProviderResult(provider, model, !hasError, time.Since(start))
+					return
+				}
+				if chunk.Err != nil {
+					hasError = true
+				}
+				// Non-blocking send with context check
+				select {
+				case out <- chunk:
+				case <-ctx.Done():
+					m.recordProviderResult(provider, model, false, time.Since(start))
+					return
+				}
 			}
-			out <- chunk
 		}
-		// Record result when stream completes
-		m.recordProviderResult(provider, model, !hasError, time.Since(start))
 	}()
 	return out
 }
@@ -531,24 +549,42 @@ func (m *Manager) executeStreamWithProvider(ctx context.Context, provider string
 			lastErr = errStream
 			continue
 		}
-		out := make(chan cliproxyexecutor.StreamChunk)
+		out := make(chan cliproxyexecutor.StreamChunk, 1)
 		go func(streamCtx context.Context, streamAuth *Auth, streamProvider string, streamChunks <-chan cliproxyexecutor.StreamChunk) {
 			defer close(out)
 			var failed bool
-			for chunk := range streamChunks {
-				if chunk.Err != nil && !failed {
-					failed = true
-					rerr := &Error{Message: chunk.Err.Error()}
-					var se cliproxyexecutor.StatusError
-					if errors.As(chunk.Err, &se) && se != nil {
-						rerr.HTTPStatus = se.StatusCode()
+			for {
+				select {
+				case <-streamCtx.Done():
+					// Context cancelled - mark as failed and exit to prevent goroutine leak
+					if !failed {
+						m.MarkResult(streamCtx, Result{AuthID: streamAuth.ID, Provider: streamProvider, Model: req.Model, Success: false, Error: &Error{Message: "context cancelled"}})
 					}
-					m.MarkResult(streamCtx, Result{AuthID: streamAuth.ID, Provider: streamProvider, Model: req.Model, Success: false, Error: rerr})
+					return
+				case chunk, ok := <-streamChunks:
+					if !ok {
+						// Input channel closed - stream complete
+						if !failed {
+							m.MarkResult(streamCtx, Result{AuthID: streamAuth.ID, Provider: streamProvider, Model: req.Model, Success: true})
+						}
+						return
+					}
+					if chunk.Err != nil && !failed {
+						failed = true
+						rerr := &Error{Message: chunk.Err.Error()}
+						var se cliproxyexecutor.StatusError
+						if errors.As(chunk.Err, &se) && se != nil {
+							rerr.HTTPStatus = se.StatusCode()
+						}
+						m.MarkResult(streamCtx, Result{AuthID: streamAuth.ID, Provider: streamProvider, Model: req.Model, Success: false, Error: rerr})
+					}
+					// Non-blocking send with context check
+					select {
+					case out <- chunk:
+					case <-streamCtx.Done():
+						return
+					}
 				}
-				out <- chunk
-			}
-			if !failed {
-				m.MarkResult(streamCtx, Result{AuthID: streamAuth.ID, Provider: streamProvider, Model: req.Model, Success: true})
 			}
 		}(execCtx, auth.Clone(), provider, chunks)
 		return out, nil
