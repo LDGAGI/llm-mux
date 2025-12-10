@@ -966,11 +966,12 @@ func (r *ModelRegistry) convertModelToMap(model *ModelInfo, handlerType string) 
 
 	case "gemini":
 		result := map[string]any{}
-		if model.Name != "" {
-			result["name"] = prefix + model.Name
-		} else {
-			result["name"] = prefix + model.ID
+		// Always use ID for consistency, add "models/" prefix for Gemini API format
+		name := model.ID
+		if !strings.HasPrefix(name, "models/") {
+			name = "models/" + name
 		}
+		result["name"] = prefix + name
 		if model.Version != "" {
 			result["version"] = model.Version
 		}
