@@ -106,8 +106,10 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 
 		tok, errTok := tokenSource.Token()
 		if errTok != nil {
-			err = errTok
-			return resp, err
+			if isOAuthRevokedError(errTok) {
+				return resp, newOAuthRevokedError(errTok)
+			}
+			return resp, errTok
 		}
 		updateGeminiCLITokenMetadata(auth, baseTokenData, tok)
 
@@ -225,8 +227,10 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 
 		tok, errTok := tokenSource.Token()
 		if errTok != nil {
-			err = errTok
-			return nil, err
+			if isOAuthRevokedError(errTok) {
+				return nil, newOAuthRevokedError(errTok)
+			}
+			return nil, errTok
 		}
 		updateGeminiCLITokenMetadata(auth, baseTokenData, tok)
 
@@ -392,6 +396,9 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 
 		tok, errTok := tokenSource.Token()
 		if errTok != nil {
+			if isOAuthRevokedError(errTok) {
+				return cliproxyexecutor.Response{}, newOAuthRevokedError(errTok)
+			}
 			return cliproxyexecutor.Response{}, errTok
 		}
 		updateGeminiCLITokenMetadata(auth, baseTokenData, tok)
