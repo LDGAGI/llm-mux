@@ -46,7 +46,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 
 	baseURL, apiKey := e.resolveCredentials(auth)
 	if baseURL == "" {
-		err = statusErr{code: http.StatusUnauthorized, msg: "missing provider baseURL"}
+		err = newCategorizedError(http.StatusUnauthorized, "missing provider baseURL", nil)
 		return
 	}
 
@@ -90,7 +90,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
 		log.Debugf("request error, error status: %d, error body: %s", httpResp.StatusCode, summarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = newCategorizedError(httpResp.StatusCode, string(b), nil)
 		return resp, err
 	}
 	body, err := io.ReadAll(httpResp.Body)
@@ -120,7 +120,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 
 	baseURL, apiKey := e.resolveCredentials(auth)
 	if baseURL == "" {
-		err = statusErr{code: http.StatusUnauthorized, msg: "missing provider baseURL"}
+		err = newCategorizedError(http.StatusUnauthorized, "missing provider baseURL", nil)
 		return nil, err
 	}
 	from := opts.SourceFormat
@@ -162,7 +162,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = newCategorizedError(httpResp.StatusCode, string(b), nil)
 		return nil, err
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
