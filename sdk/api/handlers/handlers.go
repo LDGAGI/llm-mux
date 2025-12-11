@@ -13,7 +13,6 @@ import (
 	coreexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
 	"github.com/nghyane/llm-mux/sdk/config"
 	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
 
@@ -107,7 +106,6 @@ func buildRequestOpts(normalizedModel string, rawJSON []byte, metadata map[strin
 	meta := cloneMetadata(metadata)
 
 	sourceFormat := sdktranslator.FromString(handlerType)
-	log.Infof("buildRequestOpts: handlerType=%q, sourceFormat=%q, model=%q", handlerType, sourceFormat.String(), normalizedModel)
 
 	req := coreexecutor.Request{
 		Model:    normalizedModel,
