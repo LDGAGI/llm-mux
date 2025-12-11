@@ -266,14 +266,20 @@ func parseGeminiContent(c gjson.Result) ir.Message {
 		}
 
 		if fr := part.Get("functionResponse"); fr.Exists() {
+			// Extract id field for proper tool result matching
+			// Bug fix: Previously used name as ToolCallID, causing mismatch in BuildToolMaps
+			id := fr.Get("id").String()
 			name := fr.Get("name").String()
+			if id == "" {
+				id = name // Fallback to name if id not present (legacy format)
+			}
 			response := fr.Get("response").Raw
 			if response == "" {
 				response = "{}"
 			}
 			msg.Content = append(msg.Content, ir.ContentPart{
 				Type:       ir.ContentTypeToolResult,
-				ToolResult: &ir.ToolResultPart{ToolCallID: name, Result: response},
+				ToolResult: &ir.ToolResultPart{ToolCallID: id, Result: response},
 			})
 		}
 	}
