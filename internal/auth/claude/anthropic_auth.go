@@ -152,8 +152,6 @@ func (o *ClaudeAuth) ExchangeCodeForTokens(ctx context.Context, code, state stri
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	// log.Debugf("Token exchange request: %s", string(jsonBody))
-
 	req, err := http.NewRequestWithContext(ctx, "POST", anthropicTokenURL, strings.NewReader(string(jsonBody)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create token request: %w", err)
@@ -175,12 +173,9 @@ func (o *ClaudeAuth) ExchangeCodeForTokens(ctx context.Context, code, state stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to read token response: %w", err)
 	}
-	// log.Debugf("Token response: %s", string(body))
-
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(body))
 	}
-	// log.Debugf("Token response: %s", string(body))
 
 	var tokenResp tokenResponse
 	if err = json.Unmarshal(body, &tokenResp); err != nil {
@@ -255,8 +250,6 @@ func (o *ClaudeAuth) RefreshTokens(ctx context.Context, refreshToken string) (*C
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("token refresh failed with status %d: %s", resp.StatusCode, string(body))
 	}
-
-	// log.Debugf("Token response: %s", string(body))
 
 	var tokenResp tokenResponse
 	if err = json.Unmarshal(body, &tokenResp); err != nil {

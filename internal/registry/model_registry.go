@@ -735,7 +735,6 @@ func (r *ModelRegistry) ClearModelQuotaExceeded(clientID, modelID string) {
 
 	if registration, exists := r.models[modelID]; exists {
 		delete(registration.QuotaExceededClients, clientID)
-		// log.Debugf("Cleared quota exceeded status for model %s and client %s", modelID, clientID)
 	}
 }
 
@@ -1094,13 +1093,6 @@ func (n *ModelIDNormalizer) ExtractProviderFromPrefixedID(modelID string) string
 		}
 	}
 	return ""
-}
-
-// StripProviderPrefix removes the provider prefix from a model ID if present.
-// Deprecated: Use NormalizeModelID instead.
-func StripProviderPrefix(modelID string) string {
-	normalizer := NewModelIDNormalizer()
-	return normalizer.NormalizeModelID(modelID)
 }
 
 // Returns empty string if prefixes are disabled or type is empty.

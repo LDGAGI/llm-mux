@@ -1016,9 +1016,6 @@ func (w *Watcher) reloadClients(rescanAuth bool, affectedOAuthProviders []string
 	)
 }
 
-// createClientFromFile creates a single client instance from a given token file path.
-// createClientFromFile removed (legacy)
-
 // addOrUpdateClient handles the addition or update of a single client.
 func (w *Watcher) addOrUpdateClient(path string) {
 	data, errRead := os.ReadFile(path)

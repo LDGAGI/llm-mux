@@ -127,29 +127,6 @@ func geminiKeyStringsFromConfig(cfg *config.Config) []string {
 	return out
 }
 
-func (h *Handler) applyLegacyKeys(keys []string) {
-	if h == nil || h.cfg == nil {
-		return
-	}
-	sanitized := sanitizeStringSlice(keys)
-	existing := make(map[string]config.GeminiKey, len(h.cfg.GeminiKey))
-	for _, entry := range h.cfg.GeminiKey {
-		if key := strings.TrimSpace(entry.APIKey); key != "" {
-			existing[key] = entry
-		}
-	}
-	newList := make([]config.GeminiKey, 0, len(sanitized))
-	for _, key := range sanitized {
-		if entry, ok := existing[key]; ok {
-			newList = append(newList, entry)
-		} else {
-			newList = append(newList, config.GeminiKey{APIKey: key})
-		}
-	}
-	h.cfg.GeminiKey = newList
-	h.cfg.SanitizeGeminiKeys()
-}
-
 // api-keys
 func (h *Handler) GetAPIKeys(c *gin.Context) { c.JSON(200, gin.H{"api-keys": h.cfg.APIKeys}) }
 func (h *Handler) PutAPIKeys(c *gin.Context) {

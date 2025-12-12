@@ -288,7 +288,7 @@ func (qa *QwenAuth) PollForToken(deviceCode, codeVerifier string) (*QwenTokenDat
 			// If JSON parsing fails, fall back to text response
 			return nil, fmt.Errorf("device token poll failed: %d %s. Response: %s", resp.StatusCode, resp.Status, string(body))
 		}
-		// log.Debugf("%s", string(body))
+
 		// Success - parse token data
 		var response QwenTokenResponse
 		if err = json.Unmarshal(body, &response); err != nil {

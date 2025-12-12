@@ -1350,7 +1350,6 @@ func (m *Manager) StopAutoRefresh() {
 }
 
 func (m *Manager) checkRefreshes(ctx context.Context) {
-	// log.Debugf("checking refreshes")
 	now := time.Now()
 	snapshot := m.snapshotAuths()
 	for _, a := range snapshot {

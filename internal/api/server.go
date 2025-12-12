@@ -276,7 +276,10 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	s.setupRoutes()
 
 	// Register Amp module using V2 interface with Context
-	s.ampModule = ampmodule.NewLegacy(accessManager, AuthMiddleware(accessManager))
+	s.ampModule = ampmodule.New(
+		ampmodule.WithAccessManager(accessManager),
+		ampmodule.WithAuthMiddleware(AuthMiddleware(accessManager)),
+	)
 	ctx := modules.Context{
 		Engine:         engine,
 		BaseHandler:    s.handlers,
@@ -683,10 +686,8 @@ func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, cl
 
 		// Route to Claude handler if User-Agent starts with "claude-cli"
 		if strings.HasPrefix(userAgent, "claude-cli") {
-			// log.Debugf("Routing /v1/models to Claude handler for User-Agent: %s", userAgent)
 			claudeHandler.ClaudeModels(c)
 		} else {
-			// log.Debugf("Routing /v1/models to OpenAI handler for User-Agent: %s", userAgent)
 			openaiHandler.OpenAIModels(c)
 		}
 	}
