@@ -1005,11 +1005,11 @@ func alias2ModelName(modelName string) string {
 	// Claude models: accept both prefixed and canonical names
 	// Maps to upstream model name for API call
 	case "gemini-claude-sonnet-4-5", "claude-sonnet-4-5":
-		return "claude-sonnet-4-5"
+		return "claude-3-5-sonnet"
 	case "gemini-claude-sonnet-4-5-thinking", "claude-sonnet-4-5-thinking":
-		return "claude-sonnet-4-5"
+		return "claude-3-5-sonnet"
 	case "gemini-claude-opus-4-5-thinking", "claude-opus-4-5-thinking":
-		return "claude-opus-4-5"
+		return "claude-3-opus"
 	default:
 		return modelName
 	}
