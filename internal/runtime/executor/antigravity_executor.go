@@ -269,6 +269,9 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 					continue
 				}
 				// rateLimitActionMaxExceeded - fall through to error
+			} else if (httpResp.StatusCode == http.StatusNotFound || httpResp.StatusCode >= 500) && idx+1 < len(baseURLs) {
+				log.Debugf("antigravity executor: error %d on base url %s, retrying with fallback base url: %s", httpResp.StatusCode, baseURL, baseURLs[idx+1])
+				continue
 			}
 			err = statusErr{code: httpResp.StatusCode, msg: string(bodyBytes)}
 			return nil, err
