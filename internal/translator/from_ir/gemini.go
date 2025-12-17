@@ -72,7 +72,7 @@ func (p *GeminiProvider) applyGenerationConfig(root map[string]any, req *ir.Unif
 	if req.TopK != nil {
 		genConfig["topK"] = *req.TopK
 	}
-	if req.MaxTokens != nil {
+	if req.MaxTokens != nil && *req.MaxTokens > 0 {
 		genConfig["maxOutputTokens"] = *req.MaxTokens
 	}
 	if len(req.StopSequences) > 0 {
@@ -222,17 +222,6 @@ func (p *GeminiProvider) applyGenerationConfig(root map[string]any, req *ir.Unif
 		if len(fcConfig) > 0 {
 			toolConfig["functionCallingConfig"] = fcConfig
 			root["toolConfig"] = toolConfig
-		}
-	}
-
-	// Validation: Ensure maxOutputTokens is >= 1 (Vertex/Gemini requirement)
-	if v, ok := genConfig["maxOutputTokens"].(int); ok {
-		if v < 1 {
-			genConfig["maxOutputTokens"] = 1024 // Safe default
-		}
-	} else if v32, ok := genConfig["maxOutputTokens"].(int32); ok {
-		if v32 < 1 {
-			genConfig["maxOutputTokens"] = 1024 // Safe default
 		}
 	}
 
