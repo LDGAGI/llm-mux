@@ -281,9 +281,49 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 			}
 
 		case ir.RoleAssistant:
+			// Consolidate content parts (Text/Reasoning) and ToolCalls into one "model" message.
+			// Claude Thinking requires strict ordering: Thinking -> Text? -> ToolCalls.
+
+			parts := make([]any, 0, len(msg.Content)+len(msg.ToolCalls))
+			hasThinking := false
+
+			// 1. Process Content (Thinking/Text)
+			for _, contentPart := range msg.Content {
+				switch contentPart.Type {
+				case ir.ContentTypeReasoning:
+					hasThinking = true
+					p := map[string]any{
+						"text":    contentPart.Reasoning,
+						"thought": true,
+					}
+					if isValidThoughtSignature(contentPart.ThoughtSignature) {
+						p["thoughtSignature"] = string(contentPart.ThoughtSignature)
+					}
+					parts = append(parts, p)
+				case ir.ContentTypeText:
+					p := map[string]any{"text": contentPart.Text}
+					if isValidThoughtSignature(contentPart.ThoughtSignature) {
+						p["thoughtSignature"] = string(contentPart.ThoughtSignature)
+					}
+					parts = append(parts, p)
+				}
+			}
+
+			// 2. Process Tool Calls
+			var responseParts []any
+
 			if len(msg.ToolCalls) > 0 {
-				// Pre-allocate slices
-				parts := make([]any, 0, len(msg.ToolCalls))
+				// Claude Constraint: If using tools, MUST start with thinking block.
+				// If history lacks thinking (e.g. from non-thinking model), inject shim.
+				// Note: We cannot use 'redacted_thinking' because it requires valid encrypted data.
+				isClaude := strings.Contains(req.Model, "claude")
+				if isClaude && !hasThinking {
+					parts = append([]any{map[string]any{
+						"text":    "Placeholder: Original thinking content missing from history.",
+						"thought": true,
+					}}, parts...)
+				}
+
 				toolCallIDs := make([]string, 0, len(msg.ToolCalls))
 
 				for i := range msg.ToolCalls {
@@ -295,7 +335,6 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 					}
 					toolID := tc.ID
 					if toolID == "" {
-						// Generate a unique ID for this tool call
 						toolID = fmt.Sprintf("call_%d_%d", time.Now().UnixNano(), i)
 					}
 					fcMap["id"] = toolID
@@ -306,103 +345,50 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 					if len(tc.ThoughtSignature) > 0 {
 						part["thoughtSignature"] = string(tc.ThoughtSignature)
 					} else if i == 0 {
-						// Fallback for missing signature (only for first tool call)
 						part["thoughtSignature"] = "skip_thought_signature_validator"
 					}
 					parts = append(parts, part)
 					toolCallIDs = append(toolCallIDs, toolID)
 				}
 
-				contents = append(contents, map[string]any{
-					"role":  "model",
-					"parts": parts,
-				})
-
-				var responseParts []any
-
+				// Build Tool Results (User Response) based on IDs
 				if debugToolCalls {
-					log.Debugf("gemini: TOOL CALL IDs in this message: %v", toolCallIDs)
-					log.Debugf("gemini: toolCallIDToName map: %v", toolCallIDToName)
-					toolResultIDs := make([]string, 0)
-					for id := range toolResults {
-						toolResultIDs = append(toolResultIDs, id)
-					}
-					log.Debugf("gemini: toolResults IDs: %v", toolResultIDs)
+					log.Debugf("gemini: TOOL CALL IDs: %v", toolCallIDs)
 				}
 
 				for _, tcID := range toolCallIDs {
 					name, ok := toolCallIDToName[tcID]
 					if !ok {
-						if debugToolCalls {
-							log.Debugf("gemini: SKIP - tool call ID %s not found in toolCallIDToName", tcID)
-						}
 						continue
 					}
 					resultPart, hasResult := toolResults[tcID]
 					if !hasResult {
-						if debugToolCalls {
-							log.Debugf("gemini: SKIP - tool call ID %s not found in toolResults", tcID)
-						}
 						continue
 					}
 
-					if debugToolCalls {
-						resultPreview := resultPart.Result
-						if len(resultPreview) > 100 {
-							resultPreview = resultPreview[:100]
-						}
-						log.Debugf("gemini: MATCH - tool call ID %s -> name=%s, result=%s", tcID, name, resultPreview)
-					}
-
-					// Construct functionResponse (include 'id' field for Claude models on Antigravity/Vertex)
 					funcResp := map[string]any{
 						"name": name,
 						"id":   tcID,
 					}
-
 					funcResp["response"] = buildFunctionResponseObject(resultPart.Result)
-
 					responseParts = append(responseParts, map[string]any{
 						"functionResponse": funcResp,
 					})
 				}
+			}
 
-				if len(responseParts) > 0 {
-					contents = append(contents, map[string]any{
-						"role":  "user",
-						"parts": responseParts,
-					})
-				}
-			} else {
-				// Pre-allocate parts slice
-				parts := make([]any, 0, len(msg.Content))
-				for i := range msg.Content {
-					part := &msg.Content[i]
-					switch part.Type {
-					case ir.ContentTypeReasoning:
-						p := map[string]any{
-							"text":    part.Reasoning,
-							"thought": true,
-						}
-						if isValidThoughtSignature(part.ThoughtSignature) {
-							p["thoughtSignature"] = string(part.ThoughtSignature)
-						}
-						parts = append(parts, p)
-					case ir.ContentTypeText:
-						p := map[string]any{"text": part.Text}
-						if isValidThoughtSignature(part.ThoughtSignature) {
-							p["thoughtSignature"] = string(part.ThoughtSignature)
-						}
-						parts = append(parts, p)
-					}
-				}
+			if len(parts) > 0 {
+				contents = append(contents, map[string]any{
+					"role":  "model",
+					"parts": parts,
+				})
+			}
 
-				if len(parts) > 0 {
-					contents = append(contents, map[string]any{
-						"role":  "model",
-						"parts": parts,
-					})
-				}
+			if len(responseParts) > 0 {
+				contents = append(contents, map[string]any{
+					"role":  "user",
+					"parts": responseParts,
+				})
 			}
 		}
 	}
