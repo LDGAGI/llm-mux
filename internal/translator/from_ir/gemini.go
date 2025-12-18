@@ -225,6 +225,20 @@ func (p *GeminiProvider) applyGenerationConfig(root map[string]any, req *ir.Unif
 		}
 	}
 
+	// Validation: Ensure maxOutputTokens is present and valid
+	// Upstream Antigravity/Vertex may reject missing maxOutputTokens or treat as 0
+	currentMax := 0
+	if v, ok := genConfig["maxOutputTokens"].(int); ok {
+		currentMax = v
+	} else if v32, ok := genConfig["maxOutputTokens"].(int32); ok {
+		currentMax = int(v32)
+	}
+
+	if currentMax < 1 {
+		// Default to 8192 if not provided (Safe for Claude Sonnet/Opus)
+		genConfig["maxOutputTokens"] = 8192
+	}
+
 	if len(genConfig) > 0 {
 		root["generationConfig"] = genConfig
 	}
