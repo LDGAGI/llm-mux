@@ -90,6 +90,18 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 	if err != nil {
 		return nil, err
 	}
+
+	// Start token counting in parallel (for Claude format)
+	// This runs concurrently with WebSocket connection, result ready when stream starts
+	tokensChan := make(chan int64, 1)
+	if opts.SourceFormat.String() == "claude" {
+		go func() {
+			tokensChan <- util.CountTokensFromGeminiRequest(req.Model, body.payload)
+		}()
+	} else {
+		tokensChan <- 0
+	}
+
 	endpoint := e.buildEndpoint(req.Model, body.action, opts.Alt)
 	wsReq := &wsrelay.HTTPRequest{
 		Method:  http.MethodPost,
@@ -136,6 +148,10 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
 	stream = out
+
+	// Get pre-calculated input tokens from parallel goroutine
+	estimatedInputTokens := <-tokensChan
+
 	go func(first wsrelay.StreamEvent) {
 		defer close(out)
 
@@ -143,6 +159,8 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 		streamState := &GeminiCLIStreamState{
 			ClaudeState: from_ir.NewClaudeStreamState(),
 		}
+		// Set pre-calculated input tokens for message_start
+		streamState.ClaudeState.EstimatedInputTokens = estimatedInputTokens
 		messageID := "chatcmpl-" + req.Model
 
 		processEvent := func(event wsrelay.StreamEvent) bool {

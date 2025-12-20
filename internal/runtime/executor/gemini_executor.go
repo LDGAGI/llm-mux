@@ -173,6 +173,17 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	body = util.StripThinkingConfigIfUnsupported(req.Model, body)
 	body = applyPayloadConfig(e.cfg, req.Model, body)
 
+	// Start token counting in parallel (for Claude format)
+	// This runs concurrently with HTTP request, result ready when stream starts
+	tokensChan := make(chan int64, 1)
+	if from.String() == "claude" {
+		go func() {
+			tokensChan <- util.CountTokensFromGeminiRequest(req.Model, body)
+		}()
+	} else {
+		tokensChan <- 0
+	}
+
 	baseURL := resolveGeminiBaseURL(auth)
 	url := fmt.Sprintf("%s/%s/models/%s:%s", baseURL, glAPIVersion, req.Model, "streamGenerateContent")
 	if opts.Alt == "" {
@@ -211,6 +222,10 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
 	stream = out
+
+	// Get pre-calculated input tokens from parallel goroutine
+	estimatedInputTokens := <-tokensChan
+
 	go func() {
 		defer close(out)
 		defer func() {
@@ -223,6 +238,8 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		streamState := &GeminiCLIStreamState{
 			ClaudeState: from_ir.NewClaudeStreamState(),
 		}
+		// Set pre-calculated input tokens for message_start
+		streamState.ClaudeState.EstimatedInputTokens = estimatedInputTokens
 
 		for scanner.Scan() {
 			line := scanner.Bytes()
@@ -459,4 +476,3 @@ func applyGeminiHeaders(req *http.Request, auth *cliproxyauth.Auth) {
 	}
 	util.ApplyCustomHeadersFromAttrs(req, attrs)
 }
-

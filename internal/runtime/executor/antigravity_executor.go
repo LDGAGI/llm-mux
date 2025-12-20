@@ -204,6 +204,17 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 		return nil, fmt.Errorf("failed to translate request: %w", errTranslate)
 	}
 
+	// Start token counting in parallel (for Claude format)
+	// This runs concurrently with HTTP request, result ready when stream starts
+	tokensChan := make(chan int64, 1)
+	if from.String() == "claude" {
+		go func() {
+			tokensChan <- util.CountTokensFromGeminiRequest(req.Model, translated)
+		}()
+	} else {
+		tokensChan <- 0
+	}
+
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
 	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 
@@ -280,6 +291,10 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 
 		out := make(chan cliproxyexecutor.StreamChunk)
 		stream = out
+
+		// Get pre-calculated input tokens from parallel goroutine
+		estimatedInputTokens := <-tokensChan
+
 		go func(resp *http.Response) {
 			defer close(out)
 			defer func() {
@@ -292,6 +307,8 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 
 			// Initialize streaming state with schema context from original request for tool call normalization
 			streamState := NewAntigravityStreamState(opts.OriginalRequest)
+			// Set pre-calculated input tokens for message_start
+			streamState.ClaudeState.EstimatedInputTokens = estimatedInputTokens
 			messageID := "chatcmpl-" + req.Model
 
 			for scanner.Scan() {

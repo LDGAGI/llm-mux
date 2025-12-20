@@ -344,6 +344,7 @@ func TranslateCodexResponseStream(cfg *config.Config, to sdktranslator.Format, c
 		if state.ClaudeState == nil {
 			state.ClaudeState = from_ir.NewClaudeStreamState()
 		}
+
 		for _, event := range events {
 			claudeChunks, err := from_ir.ToClaudeSSE(event, model, messageID, state.ClaudeState)
 			if err != nil {
@@ -604,6 +605,7 @@ func TranslateGeminiCLIResponseStream(cfg *config.Config, to sdktranslator.Forma
 		if state.ClaudeState == nil {
 			state.ClaudeState = &from_ir.ClaudeStreamState{}
 		}
+
 		for _, event := range events {
 
 			claudeChunks, err := from_ir.ToClaudeSSE(event, model, messageID, state.ClaudeState)
@@ -795,6 +797,7 @@ func TranslateGeminiResponseStream(cfg *config.Config, to sdktranslator.Format, 
 		if state.ClaudeState == nil {
 			state.ClaudeState = from_ir.NewClaudeStreamState()
 		}
+
 		for _, event := range events {
 			// Track tool calls across chunks
 			if event.Type == ir.EventTypeToolCall {
@@ -984,8 +987,10 @@ func TranslateOpenAIResponseStream(cfg *config.Config, to sdktranslator.Format, 
 			}
 		}
 	case "claude":
+		claudeState := from_ir.NewClaudeStreamState()
+
 		for _, event := range events {
-			claudeChunks, err := from_ir.ToClaudeSSE(event, model, messageID, &from_ir.ClaudeStreamState{})
+			claudeChunks, err := from_ir.ToClaudeSSE(event, model, messageID, claudeState)
 			if err != nil {
 				return nil, err
 			}

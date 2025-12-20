@@ -27,15 +27,16 @@ type ClaudeProvider struct{}
 
 // ClaudeStreamState tracks state for streaming response conversion.
 type ClaudeStreamState struct {
-	MessageID        string
-	Model            string
-	MessageStartSent bool
-	TextBlockStarted bool
-	CurrentBlockType string // "text" or "thinking"
-	TextBlockIndex   int    // Current block index
-	HasToolCalls     bool
-	HasTextContent   bool // Track if we emitted text (not just thinking)
-	FinishSent       bool
+	MessageID            string
+	Model                string
+	MessageStartSent     bool
+	TextBlockStarted     bool
+	CurrentBlockType     string // "text" or "thinking"
+	TextBlockIndex       int    // Current block index
+	HasToolCalls         bool
+	HasTextContent       bool // Track if we emitted text (not just thinking)
+	FinishSent           bool
+	EstimatedInputTokens int64 // Pre-calculated input tokens for message_start
 }
 
 // NewClaudeStreamState creates a new streaming state tracker.
@@ -262,12 +263,15 @@ func ToClaudeSSE(event ir.UnifiedEvent, model, messageID string, state *ClaudeSt
 	if state != nil && !state.MessageStartSent {
 		state.MessageStartSent = true
 		state.Model, state.MessageID = model, messageID
+
+		// Use pre-calculated input tokens if available (from local tokenizer)
+		inputTokens := state.EstimatedInputTokens
 		result.WriteString(formatSSE(ir.ClaudeSSEMessageStart, map[string]any{
 			"type": ir.ClaudeSSEMessageStart,
 			"message": map[string]any{
 				"id": messageID, "type": "message", "role": ir.ClaudeRoleAssistant,
 				"content": []any{}, "model": model, "stop_reason": nil, "stop_sequence": nil,
-				"usage": map[string]any{"input_tokens": 0, "output_tokens": 0},
+				"usage": map[string]any{"input_tokens": inputTokens, "output_tokens": int64(0)},
 			},
 		}))
 	}
@@ -315,7 +319,9 @@ func ToClaudeResponse(messages []ir.Message, usage *ir.Usage, model, messageID s
 		response["stop_reason"] = ir.ClaudeStopToolUse
 	}
 	if usage != nil {
-		usageMap := map[string]any{"input_tokens": usage.PromptTokens, "output_tokens": usage.CompletionTokens}
+		// Claude spec: output_tokens includes both regular output and thinking/reasoning tokens
+		outputTokens := usage.CompletionTokens + int64(usage.ThoughtsTokenCount)
+		usageMap := map[string]any{"input_tokens": usage.PromptTokens, "output_tokens": outputTokens}
 		if usage.CacheCreationInputTokens > 0 {
 			usageMap["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 		}
@@ -595,7 +601,9 @@ func emitFinishTo(result *strings.Builder, usage *ir.Usage, state *ClaudeStreamS
 	}
 	delta := map[string]any{"type": ir.ClaudeSSEMessageDelta, "delta": map[string]any{"stop_reason": stopReason}}
 	if usage != nil {
-		usageMap := map[string]any{"input_tokens": usage.PromptTokens, "output_tokens": usage.CompletionTokens}
+		// Claude spec: output_tokens includes both regular output and thinking/reasoning tokens
+		outputTokens := usage.CompletionTokens + int64(usage.ThoughtsTokenCount)
+		usageMap := map[string]any{"input_tokens": usage.PromptTokens, "output_tokens": outputTokens}
 		if usage.CacheCreationInputTokens > 0 {
 			usageMap["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 		}

@@ -17,6 +17,7 @@ import (
 	"github.com/nghyane/llm-mux/internal/oauth"
 	"github.com/nghyane/llm-mux/internal/runtime/geminicli"
 	"github.com/nghyane/llm-mux/internal/translator/from_ir"
+	"github.com/nghyane/llm-mux/internal/util"
 	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
 	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
@@ -194,6 +195,17 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 		return nil, fmt.Errorf("failed to translate request: %w", err)
 	}
 
+	// Start token counting in parallel (for Claude format)
+	// This runs concurrently with HTTP request, result ready when stream starts
+	tokensChan := make(chan int64, 1)
+	if from.String() == "claude" {
+		go func() {
+			tokensChan <- util.CountTokensFromGeminiRequest(req.Model, basePayload)
+		}()
+	} else {
+		tokensChan <- 0
+	}
+
 	projectID := resolveGeminiProjectID(auth)
 	models := []string{req.Model}
 
@@ -273,6 +285,10 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 
 		out := make(chan cliproxyexecutor.StreamChunk)
 		stream = out
+
+		// Get pre-calculated input tokens from parallel goroutine
+		estimatedInputTokens := <-tokensChan
+
 		go func(resp *http.Response, reqBody []byte, attempt string) {
 			defer close(out)
 			defer func() {
@@ -286,6 +302,8 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 				streamState := &GeminiCLIStreamState{
 					ClaudeState: from_ir.NewClaudeStreamState(),
 				}
+				// Set pre-calculated input tokens for message_start
+				streamState.ClaudeState.EstimatedInputTokens = estimatedInputTokens
 
 				for scanner.Scan() {
 					line := scanner.Bytes()
