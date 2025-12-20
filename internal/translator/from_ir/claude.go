@@ -319,8 +319,11 @@ func ToClaudeResponse(messages []ir.Message, usage *ir.Usage, model, messageID s
 		if usage.CacheCreationInputTokens > 0 {
 			usageMap["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 		}
+		// Check CacheReadInputTokens first, then fall back to PromptTokensDetails.CachedTokens
 		if usage.CacheReadInputTokens > 0 {
 			usageMap["cache_read_input_tokens"] = usage.CacheReadInputTokens
+		} else if usage.PromptTokensDetails != nil && usage.PromptTokensDetails.CachedTokens > 0 {
+			usageMap["cache_read_input_tokens"] = usage.PromptTokensDetails.CachedTokens
 		}
 		response["usage"] = usageMap
 	}
@@ -596,8 +599,11 @@ func emitFinishTo(result *strings.Builder, usage *ir.Usage, state *ClaudeStreamS
 		if usage.CacheCreationInputTokens > 0 {
 			usageMap["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
 		}
+		// Check CacheReadInputTokens first, then fall back to PromptTokensDetails.CachedTokens
 		if usage.CacheReadInputTokens > 0 {
 			usageMap["cache_read_input_tokens"] = usage.CacheReadInputTokens
+		} else if usage.PromptTokensDetails != nil && usage.PromptTokensDetails.CachedTokens > 0 {
+			usageMap["cache_read_input_tokens"] = usage.PromptTokensDetails.CachedTokens
 		}
 		delta["usage"] = usageMap
 	}
