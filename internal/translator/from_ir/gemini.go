@@ -302,12 +302,61 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 					parts = append(parts, map[string]any{"text": part.Text})
 				case ir.ContentTypeImage:
 					if part.Image != nil {
-						parts = append(parts, map[string]any{
-							"inlineData": map[string]any{
-								"mimeType": part.Image.MimeType,
-								"data":     part.Image.Data,
-							},
-						})
+						if part.Image.Data != "" {
+							// Base64-encoded image data → inlineData
+							parts = append(parts, map[string]any{
+								"inlineData": map[string]any{
+									"mimeType": part.Image.MimeType,
+									"data":     part.Image.Data,
+								},
+							})
+						} else if url := part.Image.URL; strings.HasPrefix(url, "files/") || strings.HasPrefix(url, "gs://") {
+							// Gemini file URI or GCS URI → fileData
+							// Note: HTTP URLs and Claude FileID are silently skipped (no Gemini equivalent)
+							parts = append(parts, map[string]any{
+								"fileData": map[string]any{
+									"mimeType": part.Image.MimeType,
+									"fileUri":  url,
+								},
+							})
+						}
+					}
+				case ir.ContentTypeAudio:
+					if part.Audio != nil {
+						// Detect if Data is a file URI (starts with files/) or base64 data
+						if part.Audio.Data != "" && strings.HasPrefix(part.Audio.Data, "files/") {
+							parts = append(parts, map[string]any{
+								"fileData": map[string]any{
+									"mimeType": part.Audio.MimeType,
+									"fileUri":  part.Audio.Data,
+								},
+							})
+						} else if part.Audio.Data != "" {
+							parts = append(parts, map[string]any{
+								"inlineData": map[string]any{
+									"mimeType": part.Audio.MimeType,
+									"data":     part.Audio.Data,
+								},
+							})
+						}
+					}
+				case ir.ContentTypeVideo:
+					if part.Video != nil {
+						if part.Video.Data != "" {
+							parts = append(parts, map[string]any{
+								"inlineData": map[string]any{
+									"mimeType": part.Video.MimeType,
+									"data":     part.Video.Data,
+								},
+							})
+						} else if part.Video.FileURI != "" {
+							parts = append(parts, map[string]any{
+								"fileData": map[string]any{
+									"mimeType": part.Video.MimeType,
+									"fileUri":  part.Video.FileURI,
+								},
+							})
+						}
 					}
 				}
 			}
@@ -413,6 +462,29 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 					responseParts = append(responseParts, map[string]any{
 						"functionResponse": funcResp,
 					})
+
+					// Add inlineData parts for images attached to this tool result
+					if len(resultPart.Images) > 0 {
+						for _, img := range resultPart.Images {
+							if img.Data != "" {
+								// Inline data (base64 encoded)
+								responseParts = append(responseParts, map[string]any{
+									"inlineData": map[string]any{
+										"mimeType": img.MimeType,
+										"data":     img.Data,
+									},
+								})
+							} else if img.URL != "" {
+								// File data (URI reference)
+								responseParts = append(responseParts, map[string]any{
+									"fileData": map[string]any{
+										"fileUri":  img.URL,
+										"mimeType": img.MimeType,
+									},
+								})
+							}
+						}
+					}
 				}
 			}
 
@@ -441,23 +513,64 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 // applyTools converts tool definitions to Gemini functionDeclarations format.
 func (p *GeminiProvider) applyTools(root map[string]any, req *ir.UnifiedChatRequest) error {
 	// Extract built-in tools from Metadata (using ir.Meta* constants)
-	var googleSearch, googleSearchRetrieval, codeExecution, urlContext any
+	var googleSearch, googleSearchRetrieval, codeExecution, urlContext, fileSearch any
 	if req.Metadata != nil {
 		if gs, ok := req.Metadata[ir.MetaGoogleSearch]; ok {
-			googleSearch = gs
+			// Clean internal fields before passing to Gemini
+			if gsMap, ok := gs.(map[string]any); ok {
+				cleanedGS := make(map[string]any)
+				for k, v := range gsMap {
+					if k != "_original_type" && k != "max_uses" { // Claude-specific fields
+						cleanedGS[k] = v
+					}
+				}
+				googleSearch = cleanedGS
+			} else {
+				googleSearch = gs
+			}
 		}
 		if gsr, ok := req.Metadata[ir.MetaGoogleSearchRetrieval]; ok {
 			googleSearchRetrieval = gsr
 		}
 		if ce, ok := req.Metadata[ir.MetaCodeExecution]; ok {
-			codeExecution = ce
+			// Clean internal fields
+			if ceMap, ok := ce.(map[string]any); ok {
+				cleanedCE := make(map[string]any)
+				for k, v := range ceMap {
+					if k != "container" { // OpenAI-specific field
+						cleanedCE[k] = v
+					}
+				}
+				codeExecution = cleanedCE
+			} else {
+				codeExecution = ce
+			}
 		}
 		if uc, ok := req.Metadata[ir.MetaURLContext]; ok {
 			urlContext = uc
 		}
+		if fs, ok := req.Metadata[ir.MetaFileSearch]; ok {
+			// Note: Gemini fileSearch requires fileSearchStoreNames, OpenAI uses vector_store
+			// Clean OpenAI-specific fields
+			if fsMap, ok := fs.(map[string]any); ok {
+				cleanedFS := make(map[string]any)
+				for k, v := range fsMap {
+					if k != "vector_store" && k != "max_num_results" && k != "ranking_options" {
+						cleanedFS[k] = v
+					}
+				}
+				fileSearch = cleanedFS
+			} else {
+				fileSearch = fs
+			}
+		}
+
+		// Note: Claude-specific tools (computer, bash, text_editor) have no Gemini equivalent
+		// MetaClaudeComputer, MetaClaudeBash, MetaClaudeTextEditor are silently dropped
+		// These tools require Claude-specific backend support
 	}
 
-	hasBuiltInTools := googleSearch != nil || googleSearchRetrieval != nil || codeExecution != nil || urlContext != nil
+	hasBuiltInTools := googleSearch != nil || googleSearchRetrieval != nil || codeExecution != nil || urlContext != nil || fileSearch != nil
 	if len(req.Tools) == 0 && !hasBuiltInTools {
 		return nil
 	}
@@ -508,6 +621,9 @@ func (p *GeminiProvider) applyTools(root map[string]any, req *ir.UnifiedChatRequ
 	}
 	if urlContext != nil {
 		toolNode["urlContext"] = urlContext
+	}
+	if fileSearch != nil {
+		toolNode["fileSearch"] = fileSearch
 	}
 
 	root["tools"] = []any{toolNode}

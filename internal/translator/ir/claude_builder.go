@@ -13,6 +13,7 @@ const (
 	ClaudeBlockText            = "text"
 	ClaudeBlockThinking        = "thinking"
 	ClaudeBlockImage           = "image"
+	ClaudeBlockDocument        = "document"
 	ClaudeBlockToolUse         = "tool_use"
 	ClaudeBlockToolResult      = "tool_result"
 	ClaudeSourceBase64         = "base64"

@@ -104,7 +104,52 @@ func ParseOpenAIRequest(rawJSON []byte) (*ir.UnifiedChatRequest, error) {
 						gsConfig["user_location"] = ulVal
 					}
 				}
-				req.Metadata["google_search"] = gsConfig
+				req.Metadata[ir.MetaGoogleSearch] = gsConfig
+				continue
+			}
+
+			// OpenAI code_interpreter tool → maps to Gemini codeExecution
+			if toolType == "code_interpreter" {
+				if req.Metadata == nil {
+					req.Metadata = make(map[string]any)
+				}
+				ciConfig := map[string]any{}
+				// Preserve container config if provided
+				if container := t.Get("container"); container.Exists() && container.IsObject() {
+					var containerVal any
+					if json.Unmarshal([]byte(container.Raw), &containerVal) == nil {
+						ciConfig["container"] = containerVal
+					}
+				}
+				req.Metadata[ir.MetaCodeExecution] = ciConfig
+				continue
+			}
+
+			// OpenAI file_search tool → maps to Gemini fileSearch (if supported)
+			if toolType == "file_search" {
+				if req.Metadata == nil {
+					req.Metadata = make(map[string]any)
+				}
+				fsConfig := map[string]any{}
+				// Preserve vector_store config if provided
+				if vs := t.Get("vector_store"); vs.Exists() && vs.IsObject() {
+					var vsVal any
+					if json.Unmarshal([]byte(vs.Raw), &vsVal) == nil {
+						fsConfig["vector_store"] = vsVal
+					}
+				}
+				// Preserve max_num_results if provided
+				if mnr := t.Get("max_num_results"); mnr.Exists() {
+					fsConfig["max_num_results"] = int(mnr.Int())
+				}
+				// Preserve ranking_options if provided
+				if ro := t.Get("ranking_options"); ro.Exists() && ro.IsObject() {
+					var roVal any
+					if json.Unmarshal([]byte(ro.Raw), &roVal) == nil {
+						fsConfig["ranking_options"] = roVal
+					}
+				}
+				req.Metadata[ir.MetaFileSearch] = fsConfig
 				continue
 			}
 
@@ -134,6 +179,14 @@ func ParseOpenAIRequest(rawJSON []byte) (*ir.UnifiedChatRequest, error) {
 		req.ImageConfig = &ir.ImageConfig{
 			AspectRatio: imgCfg.Get("aspect_ratio").String(),
 			ImageSize:   imgCfg.Get("image_size").String(),
+		}
+	}
+
+	// Parse audio config for OpenAI audio models (gpt-4o-audio-preview)
+	if audioCfg := root.Get("audio"); audioCfg.Exists() && audioCfg.IsObject() {
+		req.AudioConfig = &ir.AudioConfig{
+			Voice:  audioCfg.Get("voice").String(),
+			Format: audioCfg.Get("format").String(),
 		}
 	}
 
@@ -287,8 +340,20 @@ func parseResponsesContentPart(part gjson.Result) *ir.ContentPart {
 		}
 	case "input_file":
 		fp := &ir.FilePart{
-			FileID: part.Get("file_id").String(), FileURL: part.Get("file_url").String(),
-			Filename: part.Get("filename").String(), FileData: part.Get("file_data").String(),
+			FileID:   part.Get("file_id").String(),
+			FileURL:  part.Get("file_url").String(),
+			Filename: part.Get("filename").String(),
+			FileData: part.Get("file_data").String(),
+		}
+		// Extract MimeType from data URI if present (format: data:application/pdf;base64,...)
+		if fp.FileData != "" && strings.HasPrefix(fp.FileData, "data:") {
+			if semicolonIdx := strings.Index(fp.FileData, ";"); semicolonIdx > 5 {
+				fp.MimeType = fp.FileData[5:semicolonIdx]
+				// Extract just the base64 data part
+				if commaIdx := strings.Index(fp.FileData, ","); commaIdx > 0 {
+					fp.FileData = fp.FileData[commaIdx+1:]
+				}
+			}
 		}
 		if fp.FileID != "" || fp.FileURL != "" || fp.FileData != "" {
 			return &ir.ContentPart{Type: ir.ContentTypeFile, File: fp}
@@ -331,6 +396,20 @@ func ParseOpenAIResponse(rawJSON []byte) ([]ir.Message, *ir.Usage, error) {
 	if content := message.Get("content"); content.Exists() && content.String() != "" {
 		msg.Content = append(msg.Content, ir.ContentPart{Type: ir.ContentTypeText, Text: content.String()})
 	}
+
+	// Parse audio output for OpenAI audio models (gpt-4o-audio-preview)
+	if audio := message.Get("audio"); audio.Exists() && audio.IsObject() {
+		msg.Content = append(msg.Content, ir.ContentPart{
+			Type: ir.ContentTypeAudio,
+			Audio: &ir.AudioPart{
+				ID:         audio.Get("id").String(),
+				Data:       audio.Get("data").String(),
+				Transcript: audio.Get("transcript").String(),
+				ExpiresAt:  audio.Get("expires_at").Int(),
+			},
+		})
+	}
+
 	msg.ToolCalls = append(msg.ToolCalls, ir.ParseOpenAIStyleToolCalls(message.Get("tool_calls").Array())...)
 
 	// Parse refusal message if model declined to respond
@@ -501,6 +580,25 @@ func ParseOpenAIChunk(rawJSON []byte) ([]ir.UnifiedEvent, error) {
 	if refusal := delta.Get("refusal"); refusal.Exists() && refusal.String() != "" {
 		events = append(events, ir.UnifiedEvent{Type: ir.EventTypeToken, Refusal: refusal.String()})
 	}
+
+	// Parse audio delta for streaming audio output (gpt-4o-audio-preview)
+	if audio := delta.Get("audio"); audio.Exists() && audio.IsObject() {
+		audioPart := &ir.AudioPart{}
+		if id := audio.Get("id"); id.Exists() {
+			audioPart.ID = id.String()
+		}
+		if data := audio.Get("data"); data.Exists() {
+			audioPart.Data = data.String()
+		}
+		if transcript := audio.Get("transcript"); transcript.Exists() {
+			audioPart.Transcript = transcript.String()
+		}
+		if expiresAt := audio.Get("expires_at"); expiresAt.Exists() {
+			audioPart.ExpiresAt = expiresAt.Int()
+		}
+		events = append(events, ir.UnifiedEvent{Type: ir.EventTypeAudio, Audio: audioPart})
+	}
+
 	if rf := ir.ParseReasoningFromJSON(delta); rf.Text != "" {
 		var sig []byte
 		if rf.Signature != "" {
@@ -710,16 +808,43 @@ func parseOpenAIContentPart(item gjson.Result, msg *ir.Message) *ir.ContentPart 
 		if data := item.Get("source.data").String(); data != "" {
 			return &ir.ContentPart{Type: ir.ContentTypeImage, Image: &ir.ImagePart{MimeType: mediaType, Data: data}}
 		}
+	case "input_audio":
+		// OpenAI audio input for gpt-4o-audio-preview models
+		inputAudio := item.Get("input_audio")
+		if inputAudio.Exists() {
+			return &ir.ContentPart{
+				Type: ir.ContentTypeAudio,
+				Audio: &ir.AudioPart{
+					Data:   inputAudio.Get("data").String(),
+					Format: inputAudio.Get("format").String(),
+				},
+			}
+		}
 	case "file":
 		filename := item.Get("file.filename").String()
 		fileData := item.Get("file.file_data").String()
-		if filename != "" && fileData != "" {
+		fileID := item.Get("file.file_id").String()
+		fileURL := item.Get("file.url").String()
+		if filename != "" || fileData != "" || fileID != "" || fileURL != "" {
 			ext := ""
 			if idx := strings.LastIndex(filename, "."); idx >= 0 && idx < len(filename)-1 {
 				ext = filename[idx+1:]
 			}
-			if mimeType, ok := misc.MimeTypes[ext]; ok {
+			mimeType := misc.MimeTypes[ext]
+			// Check if it's an image type
+			if mimeType != "" && strings.HasPrefix(mimeType, "image/") && fileData != "" {
 				return &ir.ContentPart{Type: ir.ContentTypeImage, Image: &ir.ImagePart{MimeType: mimeType, Data: fileData}}
+			}
+			// Otherwise treat as file/document
+			return &ir.ContentPart{
+				Type: ir.ContentTypeFile,
+				File: &ir.FilePart{
+					FileID:   fileID,
+					FileURL:  fileURL,
+					Filename: filename,
+					FileData: fileData,
+					MimeType: mimeType,
+				},
 			}
 		}
 	case "tool_use":

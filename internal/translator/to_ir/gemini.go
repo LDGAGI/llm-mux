@@ -181,6 +181,17 @@ func ParseGeminiRequest(rawJSON []byte) (*ir.UnifiedChatRequest, error) {
 				}
 				req.Metadata[ir.MetaURLContext] = ucVal
 			}
+			if fs := t.Get("fileSearch"); fs.Exists() {
+				var fsVal any
+				if fs.IsObject() {
+					if err := json.Unmarshal([]byte(fs.Raw), &fsVal); err != nil {
+						fsVal = map[string]any{}
+					}
+				} else {
+					fsVal = map[string]any{}
+				}
+				req.Metadata[ir.MetaFileSearch] = fsVal
+			}
 		}
 	}
 
@@ -231,7 +242,16 @@ func parseGeminiContent(c gjson.Result) ir.Message {
 		return msg
 	}
 
-	for _, part := range parts.Array() {
+	// First pass: collect all functionResponse parts and their associated images
+	// Gemini sends functionResponse and inlineData as separate parts in the same message
+	type funcResponseInfo struct {
+		partIndex int
+		id        string
+		response  string
+	}
+	var funcResponses []funcResponseInfo
+
+	for partIdx, part := range parts.Array() {
 		if text := part.Get("text"); text.Exists() && text.String() != "" {
 			if part.Get("thought").Bool() {
 				msg.Content = append(msg.Content, ir.ContentPart{Type: ir.ContentTypeReasoning, Reasoning: text.String()})
@@ -247,20 +267,57 @@ func parseGeminiContent(c gjson.Result) ir.Message {
 			}
 			data := inlineData.Get("data").String()
 			if data != "" {
-				msg.Content = append(msg.Content, ir.ContentPart{
-					Type:  ir.ContentTypeImage,
-					Image: &ir.ImagePart{MimeType: mimeType, Data: data},
-				})
+				// Check if this is part of a user message with functionResponse
+				// If we have pending function responses, this image belongs to the last one
+				if len(funcResponses) > 0 {
+					// Will be attached to the last function response after processing
+					continue // Skip adding as standalone image, will be processed below
+				}
+				// Detect content type by MIME prefix
+				if strings.HasPrefix(mimeType, "image/") {
+					msg.Content = append(msg.Content, ir.ContentPart{
+						Type:  ir.ContentTypeImage,
+						Image: &ir.ImagePart{MimeType: mimeType, Data: data},
+					})
+				} else if strings.HasPrefix(mimeType, "audio/") {
+					msg.Content = append(msg.Content, ir.ContentPart{
+						Type:  ir.ContentTypeAudio,
+						Audio: &ir.AudioPart{MimeType: mimeType, Data: data},
+					})
+				} else if strings.HasPrefix(mimeType, "video/") {
+					msg.Content = append(msg.Content, ir.ContentPart{
+						Type:  ir.ContentTypeVideo,
+						Video: &ir.VideoPart{MimeType: mimeType, Data: data},
+					})
+				}
 			}
 		}
 
 		if fileData := part.Get("fileData"); fileData.Exists() {
 			if uri := fileData.Get("fileUri").String(); uri != "" {
 				mimeType := fileData.Get("mimeType").String()
-				msg.Content = append(msg.Content, ir.ContentPart{
-					Type:  ir.ContentTypeImage,
-					Image: &ir.ImagePart{URL: uri, MimeType: mimeType},
-				})
+				// Check if this is part of a user message with functionResponse
+				if len(funcResponses) > 0 {
+					// Will be attached to the last function response after processing
+					continue // Skip adding as standalone, will be processed below
+				}
+				// Detect content type by MIME prefix
+				if strings.HasPrefix(mimeType, "image/") {
+					msg.Content = append(msg.Content, ir.ContentPart{
+						Type:  ir.ContentTypeImage,
+						Image: &ir.ImagePart{URL: uri, MimeType: mimeType},
+					})
+				} else if strings.HasPrefix(mimeType, "audio/") {
+					msg.Content = append(msg.Content, ir.ContentPart{
+						Type:  ir.ContentTypeAudio,
+						Audio: &ir.AudioPart{MimeType: mimeType, Data: uri}, // Store fileUri in Data
+					})
+				} else if strings.HasPrefix(mimeType, "video/") {
+					msg.Content = append(msg.Content, ir.ContentPart{
+						Type:  ir.ContentTypeVideo,
+						Video: &ir.VideoPart{MimeType: mimeType, FileURI: uri},
+					})
+				}
 			}
 		}
 
@@ -291,11 +348,60 @@ func parseGeminiContent(c gjson.Result) ir.Message {
 			if response == "" {
 				response = "{}"
 			}
-			msg.Content = append(msg.Content, ir.ContentPart{
-				Type:       ir.ContentTypeToolResult,
-				ToolResult: &ir.ToolResultPart{ToolCallID: id, Result: response},
+			funcResponses = append(funcResponses, funcResponseInfo{
+				partIndex: partIdx,
+				id:        id,
+				response:  response,
 			})
 		}
+	}
+
+	// Second pass: for each function response, collect images that follow it
+	// until the next functionResponse or end of parts
+	partsArr := parts.Array()
+	for i, fr := range funcResponses {
+		toolResult := &ir.ToolResultPart{ToolCallID: fr.id, Result: fr.response}
+
+		// Find the range of parts to check for images
+		startIdx := fr.partIndex + 1
+		endIdx := len(partsArr)
+		if i+1 < len(funcResponses) {
+			endIdx = funcResponses[i+1].partIndex
+		}
+
+		// Collect images between this functionResponse and the next one
+		for j := startIdx; j < endIdx; j++ {
+			part := partsArr[j]
+
+			if inlineData := part.Get("inlineData"); inlineData.Exists() {
+				mimeType := inlineData.Get("mimeType").String()
+				if mimeType == "" {
+					mimeType = inlineData.Get("mime_type").String()
+				}
+				data := inlineData.Get("data").String()
+				if data != "" {
+					toolResult.Images = append(toolResult.Images, &ir.ImagePart{
+						MimeType: mimeType,
+						Data:     data,
+					})
+				}
+			}
+
+			if fileData := part.Get("fileData"); fileData.Exists() {
+				if uri := fileData.Get("fileUri").String(); uri != "" {
+					mimeType := fileData.Get("mimeType").String()
+					toolResult.Images = append(toolResult.Images, &ir.ImagePart{
+						URL:      uri,
+						MimeType: mimeType,
+					})
+				}
+			}
+		}
+
+		msg.Content = append(msg.Content, ir.ContentPart{
+			Type:       ir.ContentTypeToolResult,
+			ToolResult: toolResult,
+		})
 	}
 
 	return msg

@@ -3,12 +3,69 @@ package to_ir
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/tidwall/gjson"
 
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 )
+
+// OllamaStreamState tracks state for streaming response parsing.
+// Maintains accumulated content and tool calls across multiple streaming chunks.
+type OllamaStreamState struct {
+	AccumulatedContent  string
+	AccumulatedThinking string
+	ToolCalls           []ir.ToolCall
+	ToolCallIndex       int
+	FinishReason        ir.FinishReason
+}
+
+// NewOllamaStreamState creates a new streaming state for Ollama response parsing.
+func NewOllamaStreamState() *OllamaStreamState {
+	return &OllamaStreamState{
+		ToolCalls:     make([]ir.ToolCall, 0),
+		ToolCallIndex: 0,
+	}
+}
+
+// Finalize returns the complete message accumulated during streaming.
+// Should be called after all chunks have been processed.
+func (s *OllamaStreamState) Finalize() *ir.Message {
+	msg := &ir.Message{Role: ir.RoleAssistant}
+
+	// Add thinking/reasoning content first (if present)
+	if s.AccumulatedThinking != "" {
+		msg.Content = append(msg.Content, ir.ContentPart{
+			Type:      ir.ContentTypeReasoning,
+			Reasoning: s.AccumulatedThinking,
+		})
+	}
+
+	// Add text content
+	if s.AccumulatedContent != "" {
+		msg.Content = append(msg.Content, ir.ContentPart{
+			Type: ir.ContentTypeText,
+			Text: s.AccumulatedContent,
+		})
+	}
+
+	// Add accumulated tool calls
+	msg.ToolCalls = s.ToolCalls
+
+	return msg
+}
+
+// DetermineFinishReason returns the appropriate finish reason based on accumulated state.
+func (s *OllamaStreamState) DetermineFinishReason() ir.FinishReason {
+	if s.FinishReason != "" {
+		return s.FinishReason
+	}
+	if len(s.ToolCalls) > 0 {
+		return ir.FinishReasonToolCalls
+	}
+	return ir.FinishReasonStop
+}
 
 // Request Parsing (Client → Unified)
 
@@ -98,9 +155,17 @@ func ParseOllamaResponse(rawJSON []byte) ([]ir.Message, *ir.Usage, error) {
 	return []ir.Message{msg}, usage, nil
 }
 
-// ParseOllamaChunk parses streaming Ollama API chunk into events.
+// ParseOllamaChunk parses streaming Ollama API chunk into events (stateless version).
+// For multi-tool call tracking, use ParseOllamaChunkWithState instead.
 // Handles both /api/chat and /api/generate streaming formats.
 func ParseOllamaChunk(rawJSON []byte) ([]ir.UnifiedEvent, error) {
+	return ParseOllamaChunkWithState(rawJSON, nil)
+}
+
+// ParseOllamaChunkWithState parses streaming Ollama API chunk into events with state tracking.
+// Maintains state for multi-tool call accumulation across chunks.
+// If state is nil, operates in stateless mode (backward compatible with ParseOllamaChunk).
+func ParseOllamaChunkWithState(rawJSON []byte, state *OllamaStreamState) ([]ir.UnifiedEvent, error) {
 	// Ollama uses newline-delimited JSON (not SSE)
 	rawJSON = []byte(strings.TrimSpace(string(rawJSON)))
 	if len(rawJSON) == 0 {
@@ -121,7 +186,11 @@ func ParseOllamaChunk(rawJSON []byte) ([]ir.UnifiedEvent, error) {
 
 	// 1. Reasoning/Thinking
 	if thinking := source.Get("thinking"); thinking.Exists() && thinking.String() != "" {
-		events = append(events, ir.UnifiedEvent{Type: ir.EventTypeReasoning, Reasoning: thinking.String()})
+		thinkingText := thinking.String()
+		if state != nil {
+			state.AccumulatedThinking += thinkingText
+		}
+		events = append(events, ir.UnifiedEvent{Type: ir.EventTypeReasoning, Reasoning: thinkingText})
 	}
 
 	// 2. Content (Text)
@@ -131,30 +200,89 @@ func ParseOllamaChunk(rawJSON []byte) ([]ir.UnifiedEvent, error) {
 		content = root.Get("response")
 	}
 	if content.Exists() && content.String() != "" {
-		events = append(events, ir.UnifiedEvent{Type: ir.EventTypeToken, Content: content.String()})
+		contentText := content.String()
+		if state != nil {
+			state.AccumulatedContent += contentText
+		}
+		events = append(events, ir.UnifiedEvent{Type: ir.EventTypeToken, Content: contentText})
 	}
 
 	// 3. Tool Calls (only in /api/chat usually)
 	if tcs := source.Get("tool_calls"); tcs.IsArray() {
 		for _, tc := range tcs.Array() {
-			if tc.Get("type").String() == "function" {
-				events = append(events, ir.UnifiedEvent{
-					Type: ir.EventTypeToolCall,
-					ToolCall: &ir.ToolCall{
-						ID:   tc.Get("id").String(),
-						Name: tc.Get("function.name").String(),
-						Args: tc.Get("function.arguments").String(),
-					},
-				})
+			// Ollama supports both formats:
+			// 1. OpenAI-style: {"type": "function", "function": {"name": "...", "arguments": "..."}}
+			// 2. Simplified: {"function": {"name": "...", "arguments": {...}}}
+			funcData := tc.Get("function")
+			if !funcData.Exists() {
+				continue
 			}
+
+			name := funcData.Get("name").String()
+			if name == "" {
+				continue
+			}
+
+			// Get arguments - can be string or object
+			args := funcData.Get("arguments")
+			argsStr := ""
+			if args.IsObject() {
+				argsStr = args.Raw
+			} else {
+				argsStr = args.String()
+			}
+			if argsStr == "" {
+				argsStr = "{}"
+			}
+
+			// Generate or use existing tool call ID
+			toolID := tc.Get("id").String()
+			if toolID == "" {
+				if state != nil {
+					toolID = fmt.Sprintf("call_%d", state.ToolCallIndex)
+				} else {
+					toolID = ir.GenToolCallID()
+				}
+			}
+
+			toolCall := ir.ToolCall{
+				ID:   toolID,
+				Name: name,
+				Args: argsStr,
+			}
+
+			// Track in state if available
+			toolCallIndex := 0
+			if state != nil {
+				toolCallIndex = state.ToolCallIndex
+				state.ToolCalls = append(state.ToolCalls, toolCall)
+				state.ToolCallIndex++
+			}
+
+			events = append(events, ir.UnifiedEvent{
+				Type:          ir.EventTypeToolCall,
+				ToolCall:      &toolCall,
+				ToolCallIndex: toolCallIndex,
+			})
 		}
 	}
 
 	// 4. Finish / Done
 	if root.Get("done").Bool() {
+		finishReason := mapOllamaDoneReason(root.Get("done_reason").String())
+
+		// Override finish reason if we have tool calls
+		if state != nil && len(state.ToolCalls) > 0 && finishReason == ir.FinishReasonStop {
+			finishReason = ir.FinishReasonToolCalls
+		}
+
+		if state != nil {
+			state.FinishReason = finishReason
+		}
+
 		events = append(events, ir.UnifiedEvent{
 			Type:         ir.EventTypeFinish,
-			FinishReason: mapOllamaDoneReason(root.Get("done_reason").String()),
+			FinishReason: finishReason,
 			Usage:        parseOllamaUsage(root),
 		})
 	}

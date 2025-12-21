@@ -5,7 +5,17 @@ const (
 	MetaGoogleSearchRetrieval = "google_search_retrieval"
 	MetaCodeExecution         = "code_execution"
 	MetaURLContext            = "url_context"
+	MetaFileSearch            = "file_search"
 	MetaGroundingMetadata     = "grounding_metadata"
+
+	// Claude built-in tools (stored for passthrough)
+	MetaClaudeComputer   = "claude:computer"
+	MetaClaudeBash       = "claude:bash"
+	MetaClaudeTextEditor = "claude:text_editor"
+	MetaClaudeMCP        = "claude:mcp" // MCP (Model Context Protocol) servers
+
+	// MCP tool metadata keys
+	MetaMCPServers = "mcp_servers" // MCP server configurations in request
 
 	MetaOpenAILogprobs         = "openai:logprobs"
 	MetaOpenAITopLogprobs      = "openai:top_logprobs"
@@ -30,6 +40,7 @@ const (
 	EventTypeToolCall         EventType = "tool_call"
 	EventTypeToolCallDelta    EventType = "tool_call_delta"
 	EventTypeImage            EventType = "image"
+	EventTypeAudio            EventType = "audio" // Audio response event
 	EventTypeCodeExecution    EventType = "code_execution"
 	EventTypeError            EventType = "error"
 	EventTypeFinish           EventType = "finish"
@@ -118,6 +129,7 @@ type UnifiedEvent struct {
 	ToolCall          *ToolCall
 	ToolCallIndex     int
 	Image             *ImagePart
+	Audio             *AudioPart // Audio response (OpenAI audio preview)
 	CodeExecution     *CodeExecutionPart
 	GroundingMetadata *GroundingMetadata
 	Error             error
@@ -205,6 +217,8 @@ const (
 	ContentTypeReasoning      ContentType = "reasoning"
 	ContentTypeImage          ContentType = "image"
 	ContentTypeFile           ContentType = "file"
+	ContentTypeAudio          ContentType = "audio" // Audio content (OpenAI audio preview, Gemini Live)
+	ContentTypeVideo          ContentType = "video" // Video content (Gemini multimodal)
 	ContentTypeToolResult     ContentType = "tool_result"
 	ContentTypeExecutableCode ContentType = "executable_code"
 	ContentTypeCodeResult     ContentType = "code_result"
@@ -218,14 +232,17 @@ type ContentPart struct {
 	ThoughtSignature []byte // Opaque signature for thought reuse (matches SDK []byte)
 	Image            *ImagePart
 	File             *FilePart
+	Audio            *AudioPart // Audio content (OpenAI/Gemini)
+	Video            *VideoPart // Video content (Gemini)
 	ToolResult       *ToolResultPart
 	CodeExecution    *CodeExecutionPart
 }
 
 type ImagePart struct {
 	MimeType string
-	Data     string
-	URL      string
+	Data     string // Base64-encoded image data
+	URL      string // URL to image
+	FileID   string // File ID for Claude Files API
 }
 
 // FilePart represents a file input (PDF, etc.) for Responses API.
@@ -234,6 +251,25 @@ type FilePart struct {
 	FileURL  string
 	Filename string
 	FileData string
+	MimeType string // MIME type (e.g., "application/pdf", "text/plain")
+}
+
+// AudioPart represents audio content for OpenAI audio preview and Gemini Live API.
+type AudioPart struct {
+	Data       string // Base64-encoded audio data
+	Format     string // Audio format: "wav", "mp3", "pcm", "opus", "flac", "aac"
+	MimeType   string // MIME type (e.g., "audio/wav", "audio/mpeg", "audio/pcm")
+	Transcript string // Optional transcription of the audio
+	ID         string // Audio ID for response audio (OpenAI)
+	ExpiresAt  int64  // Expiration timestamp for response audio (OpenAI)
+}
+
+// VideoPart represents video content for Gemini multimodal API.
+type VideoPart struct {
+	Data     string  // Base64-encoded video data
+	FileURI  string  // Uploaded file URI reference (Gemini Files API)
+	MimeType string  // MIME type (e.g., "video/mp4", "video/webm")
+	Duration float64 // Optional duration in seconds
 }
 
 type ToolResultPart struct {
@@ -379,7 +415,9 @@ type UnifiedChatRequest struct {
 	Thinking         *ThinkingConfig
 	SafetySettings   []SafetySetting // Safety/content filtering settings
 	ImageConfig      *ImageConfig    // Image generation configuration
-	ResponseModality []string        // Response modalities (e.g., ["TEXT", "IMAGE"])
+	AudioConfig      *AudioConfig    // Audio input/output configuration (OpenAI)
+	MCPServers       []MCPServer     // MCP server configurations (Claude)
+	ResponseModality []string        // Response modalities (e.g., ["TEXT", "IMAGE", "AUDIO"])
 	Metadata         map[string]any  // Additional provider-specific metadata
 	ServiceTier      ServiceTier
 
@@ -424,4 +462,20 @@ type SafetySetting struct {
 type ImageConfig struct {
 	AspectRatio string
 	ImageSize   string
+}
+
+// AudioConfig controls audio input/output parameters (OpenAI audio preview).
+type AudioConfig struct {
+	Voice  string // Output voice: "alloy", "echo", "fable", "onyx", "nova", "shimmer"
+	Format string // Output format: "wav", "mp3", "opus", "aac", "flac", "pcm"
+}
+
+// MCPServer represents an MCP (Model Context Protocol) server configuration.
+type MCPServer struct {
+	Type               string         // Server type (e.g., "url")
+	URL                string         // MCP server URL (SSE endpoint)
+	Name               string         // Unique server identifier
+	AuthorizationToken string         // Optional auth token
+	ToolConfiguration  map[string]any // Tool access configuration
+	Metadata           map[string]any // Additional metadata
 }

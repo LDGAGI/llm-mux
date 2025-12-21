@@ -162,25 +162,128 @@ func (p *ClaudeProvider) ConvertRequest(req *ir.UnifiedChatRequest) ([]byte, err
 	}
 	root["messages"] = messages
 
-	if len(req.Tools) > 0 {
-		var tools []any
-		for _, t := range req.Tools {
-			tool := map[string]any{"name": t.Name, "description": t.Description}
-			if len(t.Parameters) > 0 {
-				tool["input_schema"] = ir.CleanJsonSchemaForClaude(copyMap(t.Parameters))
-			} else {
-				tool["input_schema"] = map[string]any{
-					"type": "object", "properties": map[string]any{}, "additionalProperties": false, "$schema": ir.JSONSchemaDraft202012,
-				}
+	// Build tools array (function tools + built-in tools from metadata)
+	var tools []any
+	for _, t := range req.Tools {
+		tool := map[string]any{"name": t.Name, "description": t.Description}
+		if len(t.Parameters) > 0 {
+			tool["input_schema"] = ir.CleanJsonSchemaForClaude(copyMap(t.Parameters))
+		} else {
+			tool["input_schema"] = map[string]any{
+				"type": "object", "properties": map[string]any{}, "additionalProperties": false, "$schema": ir.JSONSchemaDraft202012,
 			}
-			tools = append(tools, tool)
 		}
+		tools = append(tools, tool)
+	}
+
+	// Add built-in tools from Metadata
+	if req.Metadata != nil {
+		// web_search tool
+		if gsConfig, ok := req.Metadata[ir.MetaGoogleSearch]; ok {
+			webSearchTool := map[string]any{"name": "web_search"}
+			// Use preserved original type or default
+			if cfg, ok := gsConfig.(map[string]any); ok {
+				if origType, ok := cfg["_original_type"].(string); ok && origType != "" {
+					webSearchTool["type"] = origType
+				} else {
+					webSearchTool["type"] = "web_search_20250305"
+				}
+				if maxUses, ok := cfg["max_uses"]; ok {
+					webSearchTool["max_uses"] = maxUses
+				}
+			} else {
+				webSearchTool["type"] = "web_search_20250305"
+			}
+			tools = append(tools, webSearchTool)
+		}
+
+		// computer use tool
+		if compConfig, ok := req.Metadata[ir.MetaClaudeComputer]; ok {
+			computerTool := map[string]any{"name": "computer"}
+			if cfg, ok := compConfig.(map[string]any); ok {
+				if origType, ok := cfg["_original_type"].(string); ok && origType != "" {
+					computerTool["type"] = origType
+				} else {
+					computerTool["type"] = "computer_20241022"
+				}
+				if dw, ok := cfg["display_width_px"]; ok {
+					computerTool["display_width_px"] = dw
+				}
+				if dh, ok := cfg["display_height_px"]; ok {
+					computerTool["display_height_px"] = dh
+				}
+				if dn, ok := cfg["display_number"]; ok {
+					computerTool["display_number"] = dn
+				}
+			} else {
+				computerTool["type"] = "computer_20241022"
+			}
+			tools = append(tools, computerTool)
+		}
+
+		// bash tool
+		if bashConfig, ok := req.Metadata[ir.MetaClaudeBash]; ok {
+			bashTool := map[string]any{"name": "bash"}
+			if cfg, ok := bashConfig.(map[string]any); ok {
+				if origType, ok := cfg["_original_type"].(string); ok && origType != "" {
+					bashTool["type"] = origType
+				} else {
+					bashTool["type"] = "bash_20241022"
+				}
+			} else {
+				bashTool["type"] = "bash_20241022"
+			}
+			tools = append(tools, bashTool)
+		}
+
+		// text editor tool
+		if editorConfig, ok := req.Metadata[ir.MetaClaudeTextEditor]; ok {
+			editorTool := map[string]any{"name": "str_replace_editor"}
+			if cfg, ok := editorConfig.(map[string]any); ok {
+				if origType, ok := cfg["_original_type"].(string); ok && origType != "" {
+					editorTool["type"] = origType
+				} else {
+					editorTool["type"] = "text_editor_20241022"
+				}
+			} else {
+				editorTool["type"] = "text_editor_20241022"
+			}
+			tools = append(tools, editorTool)
+		}
+	}
+
+	if len(tools) > 0 {
 		root["tools"] = tools
+	}
+
+	// Add MCP servers if present
+	if len(req.MCPServers) > 0 {
+		var mcpServers []any
+		for _, srv := range req.MCPServers {
+			mcpServer := map[string]any{
+				"type": srv.Type,
+				"url":  srv.URL,
+				"name": srv.Name,
+			}
+			if srv.AuthorizationToken != "" {
+				mcpServer["authorization_token"] = srv.AuthorizationToken
+			}
+			if srv.ToolConfiguration != nil {
+				mcpServer["tool_configuration"] = srv.ToolConfiguration
+			}
+			mcpServers = append(mcpServers, mcpServer)
+		}
+		root["mcp_servers"] = mcpServers
 	}
 
 	if len(req.Metadata) > 0 {
 		meta := root["metadata"].(map[string]any)
 		for k, v := range req.Metadata {
+			// Skip built-in tool metadata (already handled above)
+			if k == ir.MetaGoogleSearch || k == ir.MetaClaudeComputer ||
+				k == ir.MetaClaudeBash || k == ir.MetaClaudeTextEditor {
+				continue
+			}
 			meta[k] = v
 		}
 	}
@@ -381,16 +484,146 @@ func buildClaudeContentParts(msg ir.Message, includeToolCalls bool, thinkingEnab
 			}
 		case ir.ContentTypeImage:
 			if p.Image != nil {
-				parts = append(parts, map[string]any{
-					"type":   ir.ClaudeBlockImage,
-					"source": map[string]any{"type": "base64", "media_type": p.Image.MimeType, "data": p.Image.Data},
-				})
+				imgBlock := map[string]any{"type": ir.ClaudeBlockImage}
+				if p.Image.Data != "" {
+					// Base64-encoded image
+					imgBlock["source"] = map[string]any{
+						"type":       "base64",
+						"media_type": p.Image.MimeType,
+						"data":       p.Image.Data,
+					}
+				} else if p.Image.URL != "" {
+					// URL-referenced image
+					imgBlock["source"] = map[string]any{
+						"type": "url",
+						"url":  p.Image.URL,
+					}
+				} else if p.Image.FileID != "" {
+					// Claude Files API reference
+					imgBlock["source"] = map[string]any{
+						"type":    "file",
+						"file_id": p.Image.FileID,
+					}
+				}
+				if _, hasSource := imgBlock["source"]; hasSource {
+					parts = append(parts, imgBlock)
+				}
+			}
+		case ir.ContentTypeFile:
+			if p.File != nil {
+				// Claude document block
+				docBlock := map[string]any{"type": ir.ClaudeBlockDocument}
+				if p.File.Filename != "" {
+					docBlock["title"] = p.File.Filename
+				}
+				source := map[string]any{}
+				if p.File.FileData != "" {
+					source["type"] = "base64"
+					source["data"] = p.File.FileData
+					// Use stored MimeType or default to application/pdf
+					if p.File.MimeType != "" {
+						source["media_type"] = p.File.MimeType
+					} else {
+						source["media_type"] = "application/pdf"
+					}
+				} else if p.File.FileURL != "" {
+					source["type"] = "url"
+					source["url"] = p.File.FileURL
+				} else if p.File.FileID != "" {
+					source["type"] = "file"
+					source["file_id"] = p.File.FileID
+				}
+				if len(source) > 0 {
+					docBlock["source"] = source
+					parts = append(parts, docBlock)
+				}
 			}
 		case ir.ContentTypeToolResult:
 			if p.ToolResult != nil {
-				parts = append(parts, map[string]any{
-					"type": ir.ClaudeBlockToolResult, "tool_use_id": p.ToolResult.ToolCallID, "content": p.ToolResult.Result,
-				})
+				// Build the tool_result block
+				toolResultBlock := map[string]any{
+					"type":        ir.ClaudeBlockToolResult,
+					"tool_use_id": p.ToolResult.ToolCallID,
+				}
+
+				// Check if we have images or files
+				hasMedia := len(p.ToolResult.Images) > 0 || len(p.ToolResult.Files) > 0
+
+				if hasMedia {
+					// Build content array with text, images, and documents
+					var content []any
+
+					// Add text content if present
+					if p.ToolResult.Result != "" {
+						content = append(content, map[string]any{
+							"type": "text",
+							"text": p.ToolResult.Result,
+						})
+					}
+
+					// Add images if present
+					for _, img := range p.ToolResult.Images {
+						if img.Data != "" {
+							content = append(content, map[string]any{
+								"type": ir.ClaudeBlockImage,
+								"source": map[string]any{
+									"type":       "base64",
+									"media_type": img.MimeType,
+									"data":       img.Data,
+								},
+							})
+						} else if img.URL != "" {
+							content = append(content, map[string]any{
+								"type": ir.ClaudeBlockImage,
+								"source": map[string]any{
+									"type": "url",
+									"url":  img.URL,
+								},
+							})
+						} else if img.FileID != "" {
+							content = append(content, map[string]any{
+								"type": ir.ClaudeBlockImage,
+								"source": map[string]any{
+									"type":    "file",
+									"file_id": img.FileID,
+								},
+							})
+						}
+					}
+
+					// Add files/documents if present
+					for _, file := range p.ToolResult.Files {
+						docBlock := map[string]any{"type": ir.ClaudeBlockDocument}
+						if file.Filename != "" {
+							docBlock["title"] = file.Filename
+						}
+						source := map[string]any{}
+						if file.FileData != "" {
+							source["type"] = "base64"
+							source["data"] = file.FileData
+							if file.MimeType != "" {
+								source["media_type"] = file.MimeType
+							}
+						} else if file.FileURL != "" {
+							source["type"] = "url"
+							source["url"] = file.FileURL
+						} else if file.FileID != "" {
+							source["type"] = "file"
+							source["file_id"] = file.FileID
+						}
+						if len(source) > 0 {
+							docBlock["source"] = source
+							content = append(content, docBlock)
+						}
+					}
+
+					toolResultBlock["content"] = content
+				} else {
+					// No images/files, use simple string content
+					toolResultBlock["content"] = p.ToolResult.Result
+				}
+
+				parts = append(parts, toolResultBlock)
 			}
 		}
 	}

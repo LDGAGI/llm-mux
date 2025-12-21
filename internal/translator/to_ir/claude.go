@@ -87,8 +87,50 @@ func ParseClaudeRequest(rawJSON []byte) (*ir.UnifiedChatRequest, error) {
 				if req.Metadata == nil {
 					req.Metadata = make(map[string]any)
 				}
-				// Map to google_search for Gemini backend
-				req.Metadata["google_search"] = map[string]any{}
+				// Map to google_search for Gemini backend, preserve original type
+				wsConfig := map[string]any{"_original_type": toolType}
+				if maxUses := t.Get("max_uses"); maxUses.Exists() {
+					wsConfig["max_uses"] = int(maxUses.Int())
+				}
+				req.Metadata[ir.MetaGoogleSearch] = wsConfig
+				continue
+			}
+
+			// Claude computer use tool: {"type": "computer_20241022", "name": "computer", ...}
+			if strings.HasPrefix(toolType, "computer") || toolName == "computer" {
+				if req.Metadata == nil {
+					req.Metadata = make(map[string]any)
+				}
+				// Store full tool config for passthrough, preserve original type
+				toolConfig := map[string]any{"_original_type": toolType}
+				if dw := t.Get("display_width_px"); dw.Exists() {
+					toolConfig["display_width_px"] = int(dw.Int())
+				}
+				if dh := t.Get("display_height_px"); dh.Exists() {
+					toolConfig["display_height_px"] = int(dh.Int())
+				}
+				if dn := t.Get("display_number"); dn.Exists() {
+					toolConfig["display_number"] = int(dn.Int())
+				}
+				req.Metadata[ir.MetaClaudeComputer] = toolConfig
+				continue
+			}
+
+			// Claude bash tool: {"type": "bash_20241022", "name": "bash"}
+			if strings.HasPrefix(toolType, "bash") || toolName == "bash" {
+				if req.Metadata == nil {
+					req.Metadata = make(map[string]any)
+				}
+				req.Metadata[ir.MetaClaudeBash] = map[string]any{"_original_type": toolType}
+				continue
+			}
+
+			// Claude text editor tool: {"type": "text_editor_20241022", "name": "str_replace_editor"}
+			if strings.HasPrefix(toolType, "text_editor") || toolName == "str_replace_editor" {
+				if req.Metadata == nil {
+					req.Metadata = make(map[string]any)
+				}
+				req.Metadata[ir.MetaClaudeTextEditor] = map[string]any{"_original_type": toolType}
 				continue
 			}
 
@@ -105,6 +147,27 @@ func ParseClaudeRequest(rawJSON []byte) (*ir.UnifiedChatRequest, error) {
 			req.Tools = append(req.Tools, ir.ToolDefinition{
 				Name: toolName, Description: t.Get("description").String(), Parameters: params,
 			})
+		}
+	}
+
+	// MCP Servers
+	if mcpServers := parsed.Get("mcp_servers"); mcpServers.Exists() && mcpServers.IsArray() {
+		for _, srv := range mcpServers.Array() {
+			mcpServer := ir.MCPServer{
+				Type: srv.Get("type").String(),
+				URL:  srv.Get("url").String(),
+				Name: srv.Get("name").String(),
+			}
+			if token := srv.Get("authorization_token"); token.Exists() {
+				mcpServer.AuthorizationToken = token.String()
+			}
+			if toolConfig := srv.Get("tool_configuration"); toolConfig.Exists() && toolConfig.IsObject() {
+				var cfg map[string]any
+				if err := json.Unmarshal([]byte(toolConfig.Raw), &cfg); err == nil {
+					mcpServer.ToolConfiguration = cfg
+				}
+			}
+			req.MCPServers = append(req.MCPServers, mcpServer)
 		}
 	}
 
@@ -192,11 +255,52 @@ func parseClaudeMessage(m gjson.Result) ir.Message {
 					ThoughtSignature: sig,
 				})
 			case "image":
-				if source := block.Get("source"); source.Exists() && source.Get("type").String() == "base64" {
-					msg.Content = append(msg.Content, ir.ContentPart{
-						Type:  ir.ContentTypeImage,
-						Image: &ir.ImagePart{MimeType: source.Get("media_type").String(), Data: source.Get("data").String()},
-					})
+				// Claude image block supports base64, url, and file sources
+				if source := block.Get("source"); source.Exists() {
+					sourceType := source.Get("type").String()
+					switch sourceType {
+					case "base64":
+						msg.Content = append(msg.Content, ir.ContentPart{
+							Type:  ir.ContentTypeImage,
+							Image: &ir.ImagePart{MimeType: source.Get("media_type").String(), Data: source.Get("data").String()},
+						})
+					case "url":
+						msg.Content = append(msg.Content, ir.ContentPart{
+							Type:  ir.ContentTypeImage,
+							Image: &ir.ImagePart{URL: source.Get("url").String()},
+						})
+					case "file":
+						// Claude Files API reference
+						msg.Content = append(msg.Content, ir.ContentPart{
+							Type:  ir.ContentTypeImage,
+							Image: &ir.ImagePart{FileID: source.Get("file_id").String()},
+						})
+					}
+				}
+			case "document":
+				// Claude document block (PDF, etc.)
+				// Supports: base64, url, file (file ID)
+				if source := block.Get("source"); source.Exists() {
+					sourceType := source.Get("type").String()
+					fp := &ir.FilePart{
+						Filename: block.Get("title").String(),
+						MimeType: source.Get("media_type").String(),
+					}
+					switch sourceType {
+					case "base64":
+						fp.FileData = source.Get("data").String()
+					case "url":
+						fp.FileURL = source.Get("url").String()
+					case "file":
+						// Claude file ID reference
+						fp.FileID = source.Get("file_id").String()
+					}
+					if fp.FileData != "" || fp.FileURL != "" || fp.FileID != "" {
+						msg.Content = append(msg.Content, ir.ContentPart{
+							Type: ir.ContentTypeFile,
+							File: fp,
+						})
+					}
 				}
 			case "tool_use":
 				toolID := block.Get("id").String()
@@ -218,6 +322,87 @@ func parseClaudeMessage(m gjson.Result) ir.Message {
 				})
 			case "tool_result":
 				resultContent := block.Get("content")
+				toolResultID := block.Get("tool_use_id").String()
+				// Strip signature from ID if present (Client sends back exact ID it received)
+				if idx := strings.Index(toolResultID, "__SIG__"); idx != -1 {
+					toolResultID = toolResultID[:idx]
+				}
+
+				toolResult := &ir.ToolResultPart{ToolCallID: toolResultID}
+
+				if resultContent.Type == gjson.String {
+					toolResult.Result = resultContent.String()
+				} else if resultContent.IsArray() {
+					var textParts []string
+					for _, part := range resultContent.Array() {
+						partType := part.Get("type").String()
+						switch partType {
+						case "text":
+							textParts = append(textParts, part.Get("text").String())
+						case "image":
+							if source := part.Get("source"); source.Exists() {
+								sourceType := source.Get("type").String()
+								img := &ir.ImagePart{}
+								switch sourceType {
+								case "base64":
+									img.MimeType = source.Get("media_type").String()
+									img.Data = source.Get("data").String()
+								case "url":
+									img.URL = source.Get("url").String()
+								case "file":
+									img.FileID = source.Get("file_id").String()
+								}
+								if img.Data != "" || img.URL != "" || img.FileID != "" {
+									toolResult.Images = append(toolResult.Images, img)
+								}
+							}
+						case "document":
+							if source := part.Get("source"); source.Exists() {
+								sourceType := source.Get("type").String()
+								file := &ir.FilePart{
+									Filename: part.Get("title").String(),
+									MimeType: source.Get("media_type").String(),
+								}
+								switch sourceType {
+								case "base64":
+									file.FileData = source.Get("data").String()
+								case "url":
+									file.FileURL = source.Get("url").String()
+								case "file":
+									file.FileID = source.Get("file_id").String()
+								}
+								if file.FileData != "" || file.FileURL != "" || file.FileID != "" {
+									toolResult.Files = append(toolResult.Files, file)
+								}
+							}
+						}
+					}
+					toolResult.Result = strings.Join(textParts, "\n")
+				} else {
+					toolResult.Result = resultContent.Raw
+				}
+
+				msg.Content = append(msg.Content, ir.ContentPart{
+					Type:       ir.ContentTypeToolResult,
+					ToolResult: toolResult,
+				})
+			case "mcp_tool_use":
+				// MCP tool use from Claude - treat like regular tool call with server info in metadata
+				toolID := block.Get("id").String()
+				inputRaw := block.Get("input").Raw
+				if inputRaw == "" {
+					inputRaw = "{}"
+				}
+				msg.ToolCalls = append(msg.ToolCalls, ir.ToolCall{
+					ID:   toolID,
+					Name: block.Get("name").String(),
+					Args: inputRaw,
+				})
+				// Note: server_name is tracked implicitly - when rebuilding for Claude,
+				// we detect MCP tools by the mcptoolu_ prefix in the ID
+			case "mcp_tool_result":
+				// MCP tool result - treat like regular tool result
+				resultContent := block.Get("content")
 				var resultStr string
 				if resultContent.Type == gjson.String {
 					resultStr = resultContent.String()
@@ -232,15 +417,9 @@ func parseClaudeMessage(m gjson.Result) ir.Message {
 				} else {
 					resultStr = resultContent.Raw
 				}
-				toolResultID := block.Get("tool_use_id").String()
-				// Strip signature from ID if present (Client sends back exact ID it received)
-				if idx := strings.Index(toolResultID, "__SIG__"); idx != -1 {
-					toolResultID = toolResultID[:idx]
-				}
-
 				msg.Content = append(msg.Content, ir.ContentPart{
 					Type:       ir.ContentTypeToolResult,
-					ToolResult: &ir.ToolResultPart{ToolCallID: toolResultID, Result: resultStr},
+					ToolResult: &ir.ToolResultPart{ToolCallID: block.Get("tool_use_id").String(), Result: resultStr},
 				})
 			}
 		}

@@ -1,6 +1,7 @@
 package to_ir
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/nghyane/llm-mux/internal/translator/ir"
@@ -40,7 +41,29 @@ func ParseKiroResponse(rawJSON []byte) ([]ir.Message, *ir.Usage, error) {
 	if len(msg.Content) == 0 && len(msg.ToolCalls) == 0 {
 		return nil, nil, nil
 	}
-	return []ir.Message{*msg}, nil, nil
+
+	// Parse usage if present
+	var usage *ir.Usage
+	if u := parsed.Get("usage"); u.Exists() {
+		usage = &ir.Usage{
+			PromptTokens:     u.Get("inputTokens").Int(),
+			CompletionTokens: u.Get("outputTokens").Int(),
+		}
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+
+	// Alternative field names (top-level inputTokens/outputTokens)
+	if usage == nil {
+		if inputTokens := parsed.Get("inputTokens"); inputTokens.Exists() {
+			usage = &ir.Usage{
+				PromptTokens:     inputTokens.Int(),
+				CompletionTokens: parsed.Get("outputTokens").Int(),
+			}
+			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+		}
+	}
+
+	return []ir.Message{*msg}, usage, nil
 }
 
 // KiroStreamState tracks state for Kiro streaming response parsing.
@@ -64,6 +87,40 @@ func (s *KiroStreamState) ProcessChunk(rawJSON []byte) ([]ir.UnifiedEvent, error
 		return nil, nil // Ignore invalid chunks in streaming
 	}
 	parsed := gjson.ParseBytes(rawJSON)
+
+	// Check for error in response
+	if errMsg := parsed.Get("error"); errMsg.Exists() {
+		return []ir.UnifiedEvent{{
+			Type:  ir.EventTypeError,
+			Error: fmt.Errorf("%s", errMsg.Get("message").String()),
+		}}, nil
+	}
+
+	// Check for error type event
+	if parsed.Get("type").String() == "error" {
+		return []ir.UnifiedEvent{{
+			Type:  ir.EventTypeError,
+			Error: fmt.Errorf("%s", parsed.Get("message").String()),
+		}}, nil
+	}
+
+	// Check for stream finish with done flag or stopReason
+	if parsed.Get("done").Bool() || parsed.Get("stopReason").Exists() {
+		usage := &ir.Usage{}
+		if inputTokens := parsed.Get("inputTokens"); inputTokens.Exists() {
+			usage.PromptTokens = inputTokens.Int()
+		}
+		if outputTokens := parsed.Get("outputTokens"); outputTokens.Exists() {
+			usage.CompletionTokens = outputTokens.Int()
+		}
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+
+		return []ir.UnifiedEvent{{
+			Type:         ir.EventTypeFinish,
+			FinishReason: s.DetermineFinishReason(),
+			Usage:        usage,
+		}}, nil
+	}
 
 	// Handle structured tool call event (incremental)
 	if parsed.Get("toolUseId").Exists() && parsed.Get("name").Exists() {
@@ -139,6 +196,21 @@ func (s *KiroStreamState) DetermineFinishReason() ir.FinishReason {
 		return ir.FinishReasonToolCalls
 	}
 	return ir.FinishReasonStop
+}
+
+// Finalize builds the final message from accumulated streaming state.
+func (s *KiroStreamState) Finalize() *ir.Message {
+	msg := &ir.Message{Role: ir.RoleAssistant}
+
+	if s.AccumulatedContent != "" {
+		msg.Content = append(msg.Content, ir.ContentPart{
+			Type: ir.ContentTypeText,
+			Text: s.AccumulatedContent,
+		})
+	}
+
+	msg.ToolCalls = s.ToolCalls
+	return msg
 }
 
 func convertToolID(id string) string {

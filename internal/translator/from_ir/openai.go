@@ -68,20 +68,67 @@ func convertToChatCompletionsRequest(req *ir.UnifiedChatRequest) ([]byte, error)
 	}
 	m["messages"] = messages
 
-	if len(req.Tools) > 0 {
-		tools := make([]any, len(req.Tools))
-		for i, t := range req.Tools {
-			params := t.Parameters
-			if params == nil {
-				params = map[string]any{"type": "object", "properties": map[string]any{}}
-			}
-			tools[i] = map[string]any{
-				"type": "function",
-				"function": map[string]any{
-					"name": t.Name, "description": t.Description, "parameters": params,
-				},
-			}
+	// Build tools array (function tools + built-in tools from metadata)
+	var tools []any
+	for _, t := range req.Tools {
+		params := t.Parameters
+		if params == nil {
+			params = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
+		tools = append(tools, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": t.Name, "description": t.Description, "parameters": params,
+			},
+		})
+	}
+
+	// Add built-in tools from Metadata
+	if req.Metadata != nil {
+		// web_search tool
+		if gsConfig, ok := req.Metadata[ir.MetaGoogleSearch]; ok {
+			webSearchTool := map[string]any{"type": "web_search_preview"}
+			if cfg, ok := gsConfig.(map[string]any); ok {
+				if scs, ok := cfg["search_context_size"]; ok {
+					webSearchTool["search_context_size"] = scs
+				}
+				if ul, ok := cfg["user_location"]; ok {
+					webSearchTool["user_location"] = ul
+				}
+			}
+			tools = append(tools, webSearchTool)
+		}
+
+		// code_interpreter tool
+		if ciConfig, ok := req.Metadata[ir.MetaCodeExecution]; ok {
+			codeInterpreterTool := map[string]any{"type": "code_interpreter"}
+			if cfg, ok := ciConfig.(map[string]any); ok {
+				if container, ok := cfg["container"]; ok {
+					codeInterpreterTool["container"] = container
+				}
+			}
+			tools = append(tools, codeInterpreterTool)
+		}
+
+		// file_search tool
+		if fsConfig, ok := req.Metadata[ir.MetaFileSearch]; ok {
+			fileSearchTool := map[string]any{"type": "file_search"}
+			if cfg, ok := fsConfig.(map[string]any); ok {
+				if vs, ok := cfg["vector_store"]; ok {
+					fileSearchTool["vector_store"] = vs
+				}
+				if mnr, ok := cfg["max_num_results"]; ok {
+					fileSearchTool["max_num_results"] = mnr
+				}
+				if ro, ok := cfg["ranking_options"]; ok {
+					fileSearchTool["ranking_options"] = ro
+				}
+			}
+			tools = append(tools, fileSearchTool)
+		}
+	}
+
+	if len(tools) > 0 {
 		m["tools"] = tools
 	}
 
@@ -93,6 +140,20 @@ func convertToChatCompletionsRequest(req *ir.UnifiedChatRequest) ([]byte, error)
 	}
 	if len(req.ResponseModality) > 0 {
 		m["modalities"] = req.ResponseModality
+	}
+
+	// Add audio config for OpenAI audio models (gpt-4o-audio-preview)
+	if req.AudioConfig != nil {
+		audioConfig := map[string]any{}
+		if req.AudioConfig.Voice != "" {
+			audioConfig["voice"] = req.AudioConfig.Voice
+		}
+		if req.AudioConfig.Format != "" {
+			audioConfig["format"] = req.AudioConfig.Format
+		}
+		if len(audioConfig) > 0 {
+			m["audio"] = audioConfig
+		}
 	}
 
 	// Restore OpenAI-specific fields from Metadata (passthrough)
@@ -146,6 +207,25 @@ func convertToResponsesAPIRequest(req *ir.UnifiedChatRequest) ([]byte, error) {
 		m["instructions"] = req.Instructions
 	}
 
+	// Add audio config for OpenAI audio models in Responses API
+	if req.AudioConfig != nil {
+		audioConfig := map[string]any{}
+		if req.AudioConfig.Voice != "" {
+			audioConfig["voice"] = req.AudioConfig.Voice
+		}
+		if req.AudioConfig.Format != "" {
+			audioConfig["format"] = req.AudioConfig.Format
+		}
+		if len(audioConfig) > 0 {
+			m["audio"] = audioConfig
+		}
+	}
+
+	// Add modalities for Responses API
+	if len(req.ResponseModality) > 0 {
+		m["modalities"] = req.ResponseModality
+	}
+
 	var input []any
 	for _, msg := range req.Messages {
 		if msg.Role == ir.RoleSystem && req.Instructions != "" {
@@ -186,6 +266,58 @@ func convertToResponsesAPIRequest(req *ir.UnifiedChatRequest) ([]byte, error) {
 			}
 		}
 		m["tools"] = tools
+	}
+
+	// Add built-in tools from Metadata for Responses API
+	if req.Metadata != nil {
+		var builtInTools []any
+
+		// web_search tool
+		if gsConfig, ok := req.Metadata[ir.MetaGoogleSearch]; ok {
+			webSearchTool := map[string]any{"type": "web_search_preview"}
+			if cfg, ok := gsConfig.(map[string]any); ok {
+				if scs, ok := cfg["search_context_size"]; ok {
+					webSearchTool["search_context_size"] = scs
+				}
+				if ul, ok := cfg["user_location"]; ok {
+					webSearchTool["user_location"] = ul
+				}
+			}
+			builtInTools = append(builtInTools, webSearchTool)
+		}
+
+		// code_interpreter tool
+		if ciConfig, ok := req.Metadata[ir.MetaCodeExecution]; ok {
+			codeInterpreterTool := map[string]any{"type": "code_interpreter"}
+			if cfg, ok := ciConfig.(map[string]any); ok {
+				if container, ok := cfg["container"]; ok {
+					codeInterpreterTool["container"] = container
+				}
+			}
+			builtInTools = append(builtInTools, codeInterpreterTool)
+		}
+
+		// file_search tool
+		if fsConfig, ok := req.Metadata[ir.MetaFileSearch]; ok {
+			fileSearchTool := map[string]any{"type": "file_search"}
+			if cfg, ok := fsConfig.(map[string]any); ok {
+				if vs, ok := cfg["vector_store"]; ok {
+					fileSearchTool["vector_store"] = vs
+				}
+				if mnr, ok := cfg["max_num_results"]; ok {
+					fileSearchTool["max_num_results"] = mnr
+				}
+				if ro, ok := cfg["ranking_options"]; ok {
+					fileSearchTool["ranking_options"] = ro
+				}
+			}
+			builtInTools = append(builtInTools, fileSearchTool)
+		}
+
+		if len(builtInTools) > 0 {
+			existingTools, _ := m["tools"].([]any)
+			m["tools"] = append(existingTools, builtInTools...)
+		}
 	}
 
 	if req.ToolChoice != "" {
@@ -287,6 +419,20 @@ func buildResponsesUserMessage(msg ir.Message) any {
 					fileItem["file_data"] = part.File.FileData
 				}
 				content = append(content, fileItem)
+			}
+		case ir.ContentTypeAudio:
+			// Audio input for Responses API
+			if part.Audio != nil && part.Audio.Data != "" {
+				inputAudio := map[string]any{
+					"data": part.Audio.Data,
+				}
+				if part.Audio.Format != "" {
+					inputAudio["format"] = part.Audio.Format
+				}
+				content = append(content, map[string]any{
+					"type":        "input_audio",
+					"input_audio": inputAudio,
+				})
 			}
 		}
 	}
@@ -449,6 +595,26 @@ func ToOpenAIChatCompletionMeta(messages []ir.Message, usage *ir.Usage, model, m
 			msgContent["tool_calls"] = tcs
 		}
 
+		// Add audio output if present (gpt-4o-audio-preview)
+		if audioPart := findAudioContent(msg); audioPart != nil {
+			audioObj := map[string]any{}
+			if audioPart.ID != "" {
+				audioObj["id"] = audioPart.ID
+			}
+			if audioPart.Data != "" {
+				audioObj["data"] = audioPart.Data
+			}
+			if audioPart.Transcript != "" {
+				audioObj["transcript"] = audioPart.Transcript
+			}
+			if audioPart.ExpiresAt > 0 {
+				audioObj["expires_at"] = audioPart.ExpiresAt
+			}
+			if len(audioObj) > 0 {
+				msgContent["audio"] = audioObj
+			}
+		}
+
 		choiceObj := map[string]any{
 			"index": 0, "finish_reason": builder.DetermineFinishReason(), "message": msgContent,
 		}
@@ -597,6 +763,27 @@ func ToOpenAIChunkMeta(event ir.UnifiedEvent, model, messageID string, chunkInde
 				},
 			}
 		}
+	case ir.EventTypeAudio:
+		// Audio streaming output for gpt-4o-audio-preview
+		if event.Audio != nil {
+			audioObj := map[string]any{}
+			if event.Audio.ID != "" {
+				audioObj["id"] = event.Audio.ID
+			}
+			if event.Audio.Data != "" {
+				audioObj["data"] = event.Audio.Data
+			}
+			if event.Audio.Transcript != "" {
+				audioObj["transcript"] = event.Audio.Transcript
+			}
+			if event.Audio.ExpiresAt > 0 {
+				audioObj["expires_at"] = event.Audio.ExpiresAt
+			}
+			choice["delta"] = map[string]any{
+				"role":  "assistant",
+				"audio": audioObj,
+			}
+		}
 	case ir.EventTypeFinish:
 		choice["finish_reason"] = ir.MapFinishReasonToOpenAI(event.FinishReason)
 		if meta != nil && meta.NativeFinishReason != "" {
@@ -743,6 +930,20 @@ func buildOpenAIUserMessage(msg ir.Message) map[string]any {
 				parts = append(parts, map[string]any{
 					"type":      "image_url",
 					"image_url": map[string]string{"url": fmt.Sprintf("data:%s;base64,%s", part.Image.MimeType, part.Image.Data)},
+				})
+			}
+		case ir.ContentTypeAudio:
+			// OpenAI audio input for gpt-4o-audio-preview models
+			if part.Audio != nil && part.Audio.Data != "" {
+				inputAudio := map[string]any{
+					"data": part.Audio.Data,
+				}
+				if part.Audio.Format != "" {
+					inputAudio["format"] = part.Audio.Format
+				}
+				parts = append(parts, map[string]any{
+					"type":        "input_audio",
+					"input_audio": inputAudio,
 				})
 			}
 		}
@@ -1190,4 +1391,17 @@ func buildOpenAIGroundingMetadata(gm *ir.GroundingMetadata) map[string]any {
 	}
 
 	return result
+}
+
+// findAudioContent finds the first audio content part in a message.
+func findAudioContent(msg *ir.Message) *ir.AudioPart {
+	if msg == nil {
+		return nil
+	}
+	for _, part := range msg.Content {
+		if part.Type == ir.ContentTypeAudio && part.Audio != nil {
+			return part.Audio
+		}
+	}
+	return nil
 }
