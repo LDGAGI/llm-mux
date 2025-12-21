@@ -328,7 +328,10 @@ func parseClaudeMessage(m gjson.Result) ir.Message {
 					toolResultID = toolResultID[:idx]
 				}
 
-				toolResult := &ir.ToolResultPart{ToolCallID: toolResultID}
+				toolResult := &ir.ToolResultPart{
+					ToolCallID: toolResultID,
+					IsError:    block.Get("is_error").Bool(),
+				}
 
 				if resultContent.Type == gjson.String {
 					toolResult.Result = resultContent.String()

@@ -154,6 +154,10 @@ func (p *ClaudeProvider) ConvertRequest(req *ir.UnifiedChatRequest) ([]byte, err
 						"type":        ir.ClaudeBlockToolResult,
 						"tool_use_id": part.ToolResult.ToolCallID,
 					}
+					// Add is_error if tool execution failed
+					if part.ToolResult.IsError {
+						toolResultBlock["is_error"] = true
+					}
 					// Check if we have images or files (need array content)
 					hasMedia := len(part.ToolResult.Images) > 0 || len(part.ToolResult.Files) > 0
 					if hasMedia {
@@ -598,6 +602,10 @@ func buildClaudeContentParts(msg ir.Message, includeToolCalls bool, thinkingEnab
 				toolResultBlock := map[string]any{
 					"type":        ir.ClaudeBlockToolResult,
 					"tool_use_id": p.ToolResult.ToolCallID,
+				}
+				// Add is_error if tool execution failed
+				if p.ToolResult.IsError {
+					toolResultBlock["is_error"] = true
 				}
 
 				// Check if we have images or files

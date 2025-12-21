@@ -275,6 +275,7 @@ type VideoPart struct {
 type ToolResultPart struct {
 	ToolCallID string
 	Result     string
+	IsError    bool // Tool execution failed (Claude is_error field)
 	Images     []*ImagePart
 	Files      []*FilePart
 }

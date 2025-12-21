@@ -125,8 +125,12 @@ func ParseClaudeContentBlock(block gjson.Result, msg *Message) {
 			result = content.Raw
 		}
 		msg.Content = append(msg.Content, ContentPart{
-			Type:       ContentTypeToolResult,
-			ToolResult: &ToolResultPart{ToolCallID: block.Get("tool_use_id").String(), Result: result},
+			Type: ContentTypeToolResult,
+			ToolResult: &ToolResultPart{
+				ToolCallID: block.Get("tool_use_id").String(),
+				Result:     result,
+				IsError:    block.Get("is_error").Bool(),
+			},
 		})
 	}
 }

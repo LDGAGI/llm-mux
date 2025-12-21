@@ -376,9 +376,15 @@ func convertMessageToResponsesInput(msg ir.Message) any {
 	case ir.RoleTool:
 		for _, part := range msg.Content {
 			if part.Type == ir.ContentTypeToolResult && part.ToolResult != nil {
-				return map[string]any{
-					"type": "function_call_output", "call_id": part.ToolResult.ToolCallID, "output": part.ToolResult.Result,
+				output := part.ToolResult.Result
+				result := map[string]any{
+					"type": "function_call_output", "call_id": part.ToolResult.ToolCallID, "output": output,
 				}
+				// Responses API supports is_error field
+				if part.ToolResult.IsError {
+					result["is_error"] = true
+				}
+				return result
 			}
 		}
 	}
@@ -989,6 +995,8 @@ func buildOpenAIAssistantMessage(msg ir.Message) map[string]any {
 func buildOpenAIToolMessage(msg ir.Message) map[string]any {
 	for _, part := range msg.Content {
 		if part.Type == ir.ContentTypeToolResult && part.ToolResult != nil {
+			// OpenAI Chat Completions API: tool messages don't have is_error field
+			// Error information should be embedded in content by the caller
 			return map[string]any{
 				"role": "tool", "tool_call_id": part.ToolResult.ToolCallID, "content": part.ToolResult.Result,
 			}

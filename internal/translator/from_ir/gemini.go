@@ -458,7 +458,7 @@ func (p *GeminiProvider) applyMessages(root map[string]any, req *ir.UnifiedChatR
 						"name": name,
 						"id":   tcID,
 					}
-					funcResp["response"] = buildFunctionResponseObject(resultPart.Result)
+					funcResp["response"] = buildFunctionResponseObject(resultPart.Result, resultPart.IsError)
 					responseParts = append(responseParts, map[string]any{
 						"functionResponse": funcResp,
 					})
@@ -1051,9 +1051,16 @@ func isValidThoughtSignature(ts []byte) bool {
 }
 
 // buildFunctionResponseObject parses tool result into Gemini function response format.
-func buildFunctionResponseObject(result string) any {
+func buildFunctionResponseObject(result string, isError bool) any {
 	if result == "" {
+		if isError {
+			return map[string]any{"error": "Tool execution failed"}
+		}
 		return map[string]any{"content": ""}
+	}
+	// If error, wrap in error field
+	if isError {
+		return map[string]any{"error": result}
 	}
 	if parsed := gjson.Parse(result); parsed.Type == gjson.JSON {
 		var jsonObj any
