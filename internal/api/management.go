@@ -2,12 +2,6 @@
 package api
 
 import (
-	"context"
-	"net/http"
-	"os"
-
-	"github.com/gin-gonic/gin"
-	"github.com/nghyane/llm-mux/internal/managementasset"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -117,36 +111,4 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/oauth/status/:state", s.mgmt.OAuthStatus)
 		mgmt.POST("/oauth/cancel/:state", s.mgmt.OAuthCancel)
 	}
-}
-
-// serveManagementControlPanel serves the management control panel HTML.
-// It attempts to serve from disk first, then falls back to embedded HTML.
-// If neither is available, it attempts to download the latest version.
-func (s *Server) serveManagementControlPanel(c *gin.Context) {
-	cfg := s.cfg
-	if cfg == nil || cfg.RemoteManagement.DisableControlPanel {
-		c.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-
-	// Try to serve from disk first (allows updates without rebuilding)
-	filePath := managementasset.FilePath(s.configFilePath)
-	if filePath != "" {
-		if _, err := os.Stat(filePath); err == nil {
-			c.File(filePath)
-			return
-		}
-	}
-
-	// Fallback to embedded HTML
-	if managementasset.HasEmbeddedHTML() {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", managementasset.GetEmbeddedHTML())
-		return
-	}
-
-	// Try to download if neither disk nor embedded available
-	if filePath != "" {
-		go managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL)
-	}
-	c.AbortWithStatus(http.StatusNotFound)
 }

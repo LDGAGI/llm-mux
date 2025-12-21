@@ -22,7 +22,6 @@ import (
 	"github.com/nghyane/llm-mux/internal/config"
 	"github.com/nghyane/llm-mux/internal/embedded"
 	"github.com/nghyane/llm-mux/internal/logging"
-	"github.com/nghyane/llm-mux/internal/managementasset"
 	"github.com/nghyane/llm-mux/internal/store"
 	"github.com/nghyane/llm-mux/internal/usage"
 	"github.com/nghyane/llm-mux/internal/util"
@@ -441,7 +440,6 @@ func main() {
 	} else {
 		cfg.AuthDir = resolvedAuthDir
 	}
-	managementasset.SetCurrentConfig(cfg)
 
 	// Create login options to be used in authentication flows.
 	options := &cmd.LoginOptions{
@@ -499,7 +497,6 @@ func main() {
 			return
 		}
 		// Start the main proxy service
-		managementasset.StartAutoUpdater(context.Background(), configFilePath)
 		cmd.StartService(cfg, configFilePath, password)
 	}
 }
