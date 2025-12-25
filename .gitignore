@@ -28,9 +28,8 @@ refs/*
 auths/*
 !auths/.gitkeep
 
-# Documentation
-docs/*
-!docs/cline-integration.md
+# Documentation (generated/private only)
+# docs/ is now tracked - contains public documentation
 AGENTS.md
 CLAUDE.md
 GEMINI.md
