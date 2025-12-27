@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/nghyane/llm-mux/internal/json"
 	"io"
@@ -134,6 +135,7 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 	var lastErr error
 
 	for idx := 0; idx < len(baseURLs); idx++ {
+		handler.Reset()
 		baseURL := baseURLs[idx]
 		hasNext := idx+1 < len(baseURLs)
 
@@ -157,6 +159,9 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 				idx--
 				continue
 			default:
+				if errors.Is(errDo, context.DeadlineExceeded) {
+					return resp, NewTimeoutError("request timed out")
+				}
 				return resp, errDo
 			}
 		}
@@ -259,6 +264,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	var lastErr error
 
 	for idx := 0; idx < len(baseURLs); idx++ {
+		handler.Reset()
 		baseURL := baseURLs[idx]
 		hasNext := idx+1 < len(baseURLs)
 
@@ -282,6 +288,9 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 				idx--
 				continue
 			default:
+				if errors.Is(errDo, context.DeadlineExceeded) {
+					return nil, NewTimeoutError("request timed out")
+				}
 				return nil, errDo
 			}
 		}
@@ -476,6 +485,9 @@ func (e *AntigravityExecutor) refreshToken(ctx context.Context, auth *cliproxyau
 	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, errDo := httpClient.Do(httpReq)
 	if errDo != nil {
+		if errors.Is(errDo, context.DeadlineExceeded) {
+			return auth, NewTimeoutError("request timed out")
+		}
 		return auth, errDo
 	}
 	defer func() {

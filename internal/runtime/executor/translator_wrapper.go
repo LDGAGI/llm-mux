@@ -1240,6 +1240,7 @@ func TranslateGeminiResponseStream(cfg *config.Config, to sdktranslator.Format, 
 	state.ToolCallIndex = ss.ToolCallIndex
 	state.ReasoningCharsAccum = ss.ReasoningCharsAccum
 	state.HasToolCalls = ss.HasToolCalls
+	state.FinishSent = ss.FinishSent
 
 	return chunks, err
 }

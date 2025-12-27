@@ -24,6 +24,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"sync"
 
@@ -281,7 +282,8 @@ func RunSSEStream(
 				if reporter != nil {
 					reporter.publishFailure(ctx)
 				}
-				sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Err: err})
+				errorJSON := fmt.Sprintf(`data: {"error": {"message": "%s", "type": "server_error"}}\n\n`, err.Error())
+				sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: []byte(errorJSON)})
 				return
 			}
 
@@ -293,7 +295,7 @@ func RunSSEStream(
 			// Send chunks to output
 			if len(chunks) > 0 {
 				for _, chunk := range chunks {
-					if !sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: chunk}) {
+					if !sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: bytes.Clone(chunk)}) {
 						return
 					}
 				}
@@ -310,7 +312,8 @@ func RunSSEStream(
 			if reporter != nil {
 				reporter.publishFailure(ctx)
 			}
-			sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Err: errScan})
+			errorJSON := fmt.Sprintf(`data: {"error": {"message": "%s", "type": "server_error"}}\n\n`, errScan.Error())
+			sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: []byte(errorJSON)})
 			return
 		}
 

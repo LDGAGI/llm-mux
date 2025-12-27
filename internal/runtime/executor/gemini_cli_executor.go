@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/nghyane/llm-mux/internal/json"
 	"io"
@@ -118,6 +119,9 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 
 		httpResp, errDo := httpClient.Do(reqHTTP)
 		if errDo != nil {
+			if errors.Is(errDo, context.DeadlineExceeded) {
+				return resp, NewTimeoutError("request timed out")
+			}
 			err = errDo
 			return resp, err
 		}
@@ -268,6 +272,9 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 
 		httpResp, errDo := httpClient.Do(reqHTTP)
 		if errDo != nil {
+			if errors.Is(errDo, context.DeadlineExceeded) {
+				return nil, NewTimeoutError("request timed out")
+			}
 			err = errDo
 			return nil, err
 		}
@@ -386,6 +393,9 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 
 		resp, errDo := httpClient.Do(reqHTTP)
 		if errDo != nil {
+			if errors.Is(errDo, context.DeadlineExceeded) {
+				return cliproxyexecutor.Response{}, NewTimeoutError("request timed out")
+			}
 			return cliproxyexecutor.Response{}, errDo
 		}
 		data, errRead := io.ReadAll(resp.Body)

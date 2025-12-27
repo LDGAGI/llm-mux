@@ -215,6 +215,12 @@ func CountTiktokenTokens(model string, req *ir.UnifiedChatRequest) int64 {
 					// Count files in tool results
 					totalTokens += int64(len(part.ToolResult.Files) * DocTokenCost)
 				}
+
+			case ir.ContentTypeRedactedThinking:
+				// Estimate tokens for encrypted binary data
+				if len(part.RedactedData) > 0 {
+					totalTokens += int64(len(part.RedactedData) / 4)
+				}
 			}
 		}
 

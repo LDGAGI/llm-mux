@@ -297,11 +297,8 @@ func messageToContent(msg *ir.Message) (*genai.Content, mediaCounts) {
 			if part.Reasoning != "" {
 				parts = append(parts, genai.NewPartFromText(part.Reasoning))
 			}
-			// ThoughtSignature is binary data, estimate tokens
-			if len(part.ThoughtSignature) > 0 {
-				// Binary signatures are typically compact, estimate ~4 bytes per token
-				parts = append(parts, genai.NewPartFromText(string(part.ThoughtSignature)))
-			}
+			// ThoughtSignature is binary data, skip tokenization
+			// (estimated tokens would be len(part.ThoughtSignature) / 4)
 
 		case ir.ContentTypeImage:
 			if part.Image != nil {
@@ -358,10 +355,8 @@ func messageToContent(msg *ir.Message) (*genai.Content, mediaCounts) {
 		tc := &msg.ToolCalls[i]
 		text := formatFunctionCall(tc.Name, tc.Args)
 		parts = append(parts, genai.NewPartFromText(text))
-		// ThoughtSignature in tool calls
-		if len(tc.ThoughtSignature) > 0 {
-			parts = append(parts, genai.NewPartFromText(string(tc.ThoughtSignature)))
-		}
+		// ThoughtSignature in tool calls is binary data, skip tokenization
+		// (estimated tokens would be len(tc.ThoughtSignature) / 4)
 	}
 
 	if len(parts) == 0 {

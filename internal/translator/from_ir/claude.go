@@ -514,7 +514,7 @@ func ToClaudeResponse(messages []ir.Message, usage *ir.Usage, model, messageID s
 	}
 	if usage != nil {
 		// Claude spec: output_tokens includes both regular output and thinking/reasoning tokens
-		outputTokens := usage.CompletionTokens + int64(usage.ThoughtsTokenCount)
+		outputTokens := usage.CompletionTokens
 		usageMap := map[string]any{"input_tokens": usage.PromptTokens, "output_tokens": outputTokens}
 		if usage.CacheCreationInputTokens > 0 {
 			usageMap["cache_creation_input_tokens"] = usage.CacheCreationInputTokens

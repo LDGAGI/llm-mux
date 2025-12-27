@@ -296,7 +296,7 @@ func ParseClaudeStreamDeltaWithState(parsed gjson.Result, state *ClaudeStreamPar
 		if state != nil {
 			idx := int(parsed.Get("index").Int())
 			if state.ToolUseArgs[idx] == nil {
-				state.ToolUseArgs[idx] = &strings.Builder{}
+				state.ToolUseArgs[idx] = GetStringBuilder()
 			}
 			if pj := delta.Get("partial_json"); pj.Exists() {
 				state.ToolUseArgs[idx].WriteString(pj.String())
@@ -349,6 +349,7 @@ func ParseClaudeContentBlockStop(parsed gjson.Result, state *ClaudeStreamParserS
 		if s := strings.TrimSpace(builder.String()); s != "" {
 			args = s
 		}
+		PutStringBuilder(builder)
 	}
 
 	delete(state.ToolUseNames, idx)

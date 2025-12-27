@@ -26,6 +26,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/nghyane/llm-mux/internal/json"
 	"io"
@@ -226,6 +227,9 @@ func (e *GeminiVertexExecutor) executeWithStrategy(ctx context.Context, auth *cl
 	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, errDo := httpClient.Do(httpReq)
 	if errDo != nil {
+		if errors.Is(errDo, context.DeadlineExceeded) {
+			return resp, NewTimeoutError("request timed out")
+		}
 		return resp, errDo
 	}
 	defer func() {
@@ -305,6 +309,9 @@ func (e *GeminiVertexExecutor) executeStreamWithStrategy(ctx context.Context, au
 	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, errDo := httpClient.Do(httpReq)
 	if errDo != nil {
+		if errors.Is(errDo, context.DeadlineExceeded) {
+			return nil, NewTimeoutError("request timed out")
+		}
 		return nil, errDo
 	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
@@ -375,6 +382,9 @@ func (e *GeminiVertexExecutor) countTokensWithStrategy(ctx context.Context, auth
 	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, errDo := httpClient.Do(httpReq)
 	if errDo != nil {
+		if errors.Is(errDo, context.DeadlineExceeded) {
+			return cliproxyexecutor.Response{}, NewTimeoutError("request timed out")
+		}
 		return cliproxyexecutor.Response{}, errDo
 	}
 	defer func() {

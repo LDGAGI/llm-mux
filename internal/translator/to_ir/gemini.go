@@ -296,6 +296,11 @@ func parseGeminiContent(c gjson.Result) ir.Message {
 			}
 		}
 
+		// Handle redacted thinking content (encrypted binary data)
+		if data := part.Get("data"); data.Exists() && data.String() != "" {
+			msg.Content = append(msg.Content, ir.ContentPart{Type: ir.ContentTypeRedactedThinking, RedactedData: data.String()})
+		}
+
 		if inlineData := part.Get("inlineData"); inlineData.Exists() {
 			mimeType := inlineData.Get("mimeType").String()
 			if mimeType == "" {
