@@ -336,6 +336,14 @@ func TranslateToGeminiCLIWithTokens(cfg *config.Config, from sdktranslator.Forma
 		return nil, err
 	}
 
+	// Vertex/Antigravity API does not return thinking content in non-streaming responses.
+	// Disable thinking for Claude models in non-streaming mode to avoid confusion and wasted tokens.
+	if isClaudeModel && !streaming && irReq.Thinking != nil {
+		// Use internal logger
+		// Note: translator_wrapper uses global_logger via logging package
+		irReq.Thinking = nil
+	}
+
 	geminiJSON, err := (&from_ir.GeminiCLIProvider{}).ConvertRequest(irReq)
 	if err != nil {
 		return nil, err
