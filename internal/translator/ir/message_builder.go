@@ -25,6 +25,10 @@ func CombineTextAndReasoning(msg Message) (text, reasoning string) {
 				reasoningCount++
 				singleReasoning = part.Reasoning
 			}
+		case ContentTypeRedactedThinking:
+			if part.RedactedData != "" {
+				reasoningCount++
+			}
 		}
 	}
 
@@ -119,9 +123,12 @@ func CombineReasoningParts(msg Message) string {
 	count := 0
 	var single string
 	for _, part := range msg.Content {
-		if part.Type == ContentTypeReasoning && part.Reasoning != "" {
+		if (part.Type == ContentTypeReasoning && part.Reasoning != "") ||
+			(part.Type == ContentTypeRedactedThinking && part.RedactedData != "") {
 			count++
-			single = part.Reasoning
+			if part.Type == ContentTypeReasoning {
+				single = part.Reasoning
+			}
 			if count > 1 {
 				break
 			}
@@ -142,6 +149,8 @@ func CombineReasoningParts(msg Message) string {
 		if part.Type == ContentTypeReasoning && part.Reasoning != "" {
 			b.WriteString(part.Reasoning)
 		}
+		// Note: ContentTypeRedactedThinking is counted but not included in combined string
+		// as it contains encrypted data, not readable text
 	}
 	return b.String()
 }

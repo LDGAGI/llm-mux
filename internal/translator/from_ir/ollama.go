@@ -262,7 +262,7 @@ func buildOllamaToolMessage(msg ir.Message) map[string]any {
 // ToOllamaChatResponse converts messages to Ollama /api/chat response.
 // Use when sending response TO client in Ollama chat format (non-streaming).
 func ToOllamaChatResponse(messages []ir.Message, usage *ir.Usage, model string) ([]byte, error) {
-	builder := ir.NewResponseBuilder(messages, usage, model)
+	builder := ir.NewResponseBuilder(messages, usage, model, false)
 
 	response := map[string]any{
 		"model":      model,
@@ -312,7 +312,7 @@ func ToOllamaChatResponse(messages []ir.Message, usage *ir.Usage, model string) 
 // ToOllamaGenerateResponse converts messages to Ollama /api/generate response.
 // Use when sending response TO client in Ollama generate format (non-streaming).
 func ToOllamaGenerateResponse(messages []ir.Message, usage *ir.Usage, model string) ([]byte, error) {
-	builder := ir.NewResponseBuilder(messages, usage, model)
+	builder := ir.NewResponseBuilder(messages, usage, model, false)
 
 	response := map[string]any{
 		"model":       model,

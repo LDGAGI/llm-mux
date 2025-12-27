@@ -15,14 +15,15 @@ func ToClaudeToolID(id string) string {
 
 // ResponseBuilder helps construct provider-specific responses from IR messages
 type ResponseBuilder struct {
-	messages []Message
-	usage    *Usage
-	model    string
+	messages        []Message
+	usage           *Usage
+	model           string
+	thinkingEnabled bool
 }
 
 // NewResponseBuilder creates a new response builder
-func NewResponseBuilder(messages []Message, usage *Usage, model string) *ResponseBuilder {
-	return &ResponseBuilder{messages: messages, usage: usage, model: model}
+func NewResponseBuilder(messages []Message, usage *Usage, model string, thinkingEnabled bool) *ResponseBuilder {
+	return &ResponseBuilder{messages: messages, usage: usage, model: model, thinkingEnabled: thinkingEnabled}
 }
 
 // GetLastMessage returns the last message or nil if no messages exist
@@ -113,8 +114,8 @@ func (b *ResponseBuilder) BuildClaudeContentParts() []any {
 		return []any{}
 	}
 
-	// Use the consolidated function with includeToolCalls=true and thinkingEnabled=false for responses
-	parts := BuildClaudeContentParts(*msg, true, false)
+	// Use the consolidated function with includeToolCalls=true and thinkingEnabled=b.thinkingEnabled for responses
+	parts := BuildClaudeContentParts(*msg, true, b.thinkingEnabled)
 
 	// Safety Check: Ensure response has content.
 	// This must be checked LAST, after processing all potential content types (thinking, text, tools).
@@ -219,7 +220,7 @@ func BuildClaudeContentParts(msg Message, includeToolCalls bool, thinkingEnabled
 
 	// Check if we have thinking content and text/tool content
 	hasThinking := false
-	hasTextOrImage := false
+	hasNonThinkingContent := false
 	for i := range msg.Content {
 		switch msg.Content[i].Type {
 		case ContentTypeReasoning:
@@ -231,8 +232,8 @@ func BuildClaudeContentParts(msg Message, includeToolCalls bool, thinkingEnabled
 			if msg.Content[i].RedactedData != "" {
 				hasThinking = true
 			}
-		case ContentTypeText, ContentTypeImage:
-			hasTextOrImage = true
+		case ContentTypeText, ContentTypeImage, ContentTypeFile, ContentTypeToolResult:
+			hasNonThinkingContent = true
 		}
 	}
 
@@ -486,7 +487,7 @@ func BuildClaudeContentParts(msg Message, includeToolCalls bool, thinkingEnabled
 
 	// Client requirement: Response must have text or tool calls, not just thinking
 	// If we only have thinking content (no text, no tool calls), add text block with space
-	if hasThinking && !hasTextOrImage && len(msg.ToolCalls) == 0 {
+	if hasThinking && !hasNonThinkingContent && len(msg.ToolCalls) == 0 {
 		parts = append(parts, map[string]any{"type": ClaudeBlockText, "text": " "})
 	}
 

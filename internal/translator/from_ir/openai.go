@@ -550,7 +550,7 @@ func ToOpenAIChatCompletionCandidates(candidates []ir.CandidateResult, usage *ir
 			continue
 		}
 
-		builder := ir.NewResponseBuilder(candidate.Messages, usage, model)
+		builder := ir.NewResponseBuilder(candidate.Messages, usage, model, false)
 		msg := builder.GetLastMessage()
 		if msg == nil {
 			continue
@@ -644,7 +644,7 @@ func ToOpenAIChatCompletionCandidates(candidates []ir.CandidateResult, usage *ir
 }
 
 func ToOpenAIChatCompletionMeta(messages []ir.Message, usage *ir.Usage, model, messageID string, meta *ir.OpenAIMeta) ([]byte, error) {
-	builder := ir.NewResponseBuilder(messages, usage, model)
+	builder := ir.NewResponseBuilder(messages, usage, model, false)
 	responseID, created := messageID, time.Now().Unix()
 	if meta != nil {
 		if meta.ResponseID != "" {
@@ -1127,7 +1127,7 @@ func ToResponsesAPIResponse(messages []ir.Message, usage *ir.Usage, model string
 
 	var output []any
 	var outputText string
-	builder := ir.NewResponseBuilder(messages, usage, model)
+	builder := ir.NewResponseBuilder(messages, usage, model, false)
 
 	for _, msg := range messages {
 		if msg.Role != ir.RoleAssistant {

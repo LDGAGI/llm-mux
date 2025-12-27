@@ -674,7 +674,7 @@ func ToGeminiResponse(messages []ir.Message, usage *ir.Usage, model string) ([]b
 
 // ToGeminiResponseMeta converts messages to a complete Gemini API response with metadata.
 func ToGeminiResponseMeta(messages []ir.Message, usage *ir.Usage, model string, meta *ir.OpenAIMeta) ([]byte, error) {
-	builder := ir.NewResponseBuilder(messages, usage, model)
+	builder := ir.NewResponseBuilder(messages, usage, model, false)
 
 	response := map[string]any{
 		"candidates":   []any{},
@@ -1008,7 +1008,7 @@ func (p *GeminiProvider) applyThinkingConfig(genConfig map[string]any, req *ir.U
 	}
 
 	if isGemini3 {
-		p.applyGemini3ThinkingConfig(genConfig, req)
+		p.applyGemini3ThinkingConfig(genConfig, req, effectiveInclude)
 	} else {
 		genConfig["thinkingConfig"] = map[string]any{
 			"thinkingBudget":  effectiveBudget,
@@ -1019,8 +1019,8 @@ func (p *GeminiProvider) applyThinkingConfig(genConfig map[string]any, req *ir.U
 	p.adjustMaxTokensForThinking(genConfig, req)
 }
 
-func (p *GeminiProvider) applyGemini3ThinkingConfig(genConfig map[string]any, req *ir.UnifiedChatRequest) {
-	tc := map[string]any{"includeThoughts": true}
+func (p *GeminiProvider) applyGemini3ThinkingConfig(genConfig map[string]any, req *ir.UnifiedChatRequest, effectiveInclude bool) {
+	tc := map[string]any{"includeThoughts": effectiveInclude}
 
 	var thinkingLevel string
 	switch {
@@ -1043,11 +1043,15 @@ func (p *GeminiProvider) adjustMaxTokensForThinking(genConfig map[string]any, re
 	}
 
 	var b int32
-	switch v := tc["thinkingBudget"].(type) {
-	case int:
-		b = int32(v)
-	case int32:
-		b = v
+	if level, ok := tc["thinkingLevel"].(string); ok {
+		b = int32(ir.ThinkingLevelToBudget(ir.ThinkingLevel(level)))
+	} else {
+		switch v := tc["thinkingBudget"].(type) {
+		case int:
+			b = int32(v)
+		case int32:
+			b = v
+		}
 	}
 
 	if b <= 0 {

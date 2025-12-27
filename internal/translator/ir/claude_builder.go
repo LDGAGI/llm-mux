@@ -41,6 +41,7 @@ type ClaudeStreamParserState struct {
 	ToolUseIDs               map[int]string
 	ToolUseArgs              map[int]*strings.Builder
 	CurrentThinkingSignature string
+	BlockTypes               map[int]string
 }
 
 func NewClaudeStreamParserState() *ClaudeStreamParserState {
@@ -48,6 +49,7 @@ func NewClaudeStreamParserState() *ClaudeStreamParserState {
 		ToolUseNames: make(map[int]string),
 		ToolUseIDs:   make(map[int]string),
 		ToolUseArgs:  make(map[int]*strings.Builder),
+		BlockTypes:   make(map[int]string),
 	}
 }
 
@@ -167,6 +169,70 @@ func ParseClaudeContentBlock(block gjson.Result, msg *Message) {
 				RedactedData: data,
 			})
 		}
+	case "mcp_tool_use":
+		args := block.Get("input").Raw
+		if args == "" {
+			args = "{}"
+		}
+		msg.ToolCalls = append(msg.ToolCalls, ToolCall{
+			ID: block.Get("id").String(), Name: block.Get("name").String(), Args: args,
+		})
+	case "mcp_tool_result":
+		content := block.Get("content")
+		var result string
+		if content.Type == gjson.String {
+			result = content.String()
+		} else if content.IsArray() {
+			var parts []string
+			for _, part := range content.Array() {
+				if part.Get("type").String() == ClaudeBlockText {
+					parts = append(parts, part.Get("text").String())
+				}
+			}
+			result = strings.Join(parts, "\n")
+		} else {
+			result = content.Raw
+		}
+		msg.Content = append(msg.Content, ContentPart{
+			Type: ContentTypeToolResult,
+			ToolResult: &ToolResultPart{
+				ToolCallID: block.Get("tool_use_id").String(),
+				Result:     result,
+				IsError:    block.Get("is_error").Bool(),
+			},
+		})
+	case "server_tool_use":
+		args := block.Get("input").Raw
+		if args == "" {
+			args = "{}"
+		}
+		msg.ToolCalls = append(msg.ToolCalls, ToolCall{
+			ID: block.Get("id").String(), Name: block.Get("name").String(), Args: args,
+		})
+	case "web_search_tool_result":
+		content := block.Get("content")
+		var result string
+		if content.Type == gjson.String {
+			result = content.String()
+		} else if content.IsArray() {
+			var parts []string
+			for _, part := range content.Array() {
+				if part.Get("type").String() == ClaudeBlockText {
+					parts = append(parts, part.Get("text").String())
+				}
+			}
+			result = strings.Join(parts, "\n")
+		} else {
+			result = content.Raw
+		}
+		msg.Content = append(msg.Content, ContentPart{
+			Type: ContentTypeToolResult,
+			ToolResult: &ToolResultPart{
+				ToolCallID: block.Get("tool_use_id").String(),
+				Result:     result,
+				IsError:    block.Get("is_error").Bool(),
+			},
+		})
 	}
 }
 
@@ -246,8 +312,9 @@ func ParseClaudeContentBlockStart(parsed gjson.Result, state *ClaudeStreamParser
 		return nil
 	}
 	cb := parsed.Get("content_block")
+	idx := int(parsed.Get("index").Int())
+	state.BlockTypes[idx] = cb.Get("type").String()
 	if cb.Get("type").String() == ClaudeBlockToolUse {
-		idx := int(parsed.Get("index").Int())
 		state.ToolUseNames[idx] = cb.Get("name").String()
 		state.ToolUseIDs[idx] = cb.Get("id").String()
 	} else if cb.Get("type").String() == ClaudeBlockThinking {
@@ -269,6 +336,11 @@ func ParseClaudeContentBlockStop(parsed gjson.Result, state *ClaudeStreamParserS
 	idx := int(parsed.Get("index").Int())
 	name, id := state.ToolUseNames[idx], state.ToolUseIDs[idx]
 	if name == "" && id == "" {
+		// Check if it's a thinking block and clear signature
+		if state.BlockTypes[idx] == ClaudeBlockThinking {
+			state.CurrentThinkingSignature = ""
+		}
+		delete(state.BlockTypes, idx)
 		return nil
 	}
 
@@ -282,6 +354,7 @@ func ParseClaudeContentBlockStop(parsed gjson.Result, state *ClaudeStreamParserS
 	delete(state.ToolUseNames, idx)
 	delete(state.ToolUseIDs, idx)
 	delete(state.ToolUseArgs, idx)
+	delete(state.BlockTypes, idx)
 
 	return []UnifiedEvent{{
 		Type:     EventTypeToolCall,

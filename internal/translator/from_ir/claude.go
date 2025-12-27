@@ -502,7 +502,7 @@ func ToClaudeSSE(event ir.UnifiedEvent, model, messageID string, state *ClaudeSt
 
 // ToClaudeResponse converts messages to complete Claude response.
 func ToClaudeResponse(messages []ir.Message, usage *ir.Usage, model, messageID string) ([]byte, error) {
-	builder := ir.NewResponseBuilder(messages, usage, model)
+	builder := ir.NewResponseBuilder(messages, usage, model, false)
 	content := builder.BuildClaudeContentParts()
 
 	response := map[string]any{
