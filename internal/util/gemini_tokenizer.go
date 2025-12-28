@@ -115,12 +115,18 @@ func countGeminiTokens(model string, req *ir.UnifiedChatRequest) int64 {
 
 	// Count instructions tokens (Responses API system instructions)
 	if req.Instructions != "" {
-		instructionContent := &genai.Content{
-			Role:  "user",
-			Parts: []*genai.Part{genai.NewPartFromText(req.Instructions)},
-		}
-		if result, err := tok.CountTokens([]*genai.Content{instructionContent}, nil); err == nil {
-			contentTokens += int64(result.TotalTokens)
+		if cached, ok := InstructionTokenCache.Get(req.Instructions); ok {
+			contentTokens += int64(cached)
+		} else {
+			instructionContent := &genai.Content{
+				Role:  "user",
+				Parts: []*genai.Part{genai.NewPartFromText(req.Instructions)},
+			}
+			if result, err := tok.CountTokens([]*genai.Content{instructionContent}, nil); err == nil {
+				tokens := int(result.TotalTokens)
+				InstructionTokenCache.Set(req.Instructions, tokens)
+				contentTokens += int64(tokens)
+			}
 		}
 	}
 
@@ -387,9 +393,14 @@ func countToolTokensFromIR(tok *tokenizer.LocalTokenizer, tools []ir.ToolDefinit
 		return 0
 	}
 
+	toolsJSONStr := string(toolsJSON)
+	if cached, ok := ToolTokenCache.Get(toolsJSONStr); ok {
+		return int64(cached)
+	}
+
 	content := &genai.Content{
 		Role:  "user",
-		Parts: []*genai.Part{genai.NewPartFromText(string(toolsJSON))},
+		Parts: []*genai.Part{genai.NewPartFromText(toolsJSONStr)},
 	}
 
 	result, err := tok.CountTokens([]*genai.Content{content}, nil)
@@ -397,7 +408,9 @@ func countToolTokensFromIR(tok *tokenizer.LocalTokenizer, tools []ir.ToolDefinit
 		return 0
 	}
 
-	return int64(result.TotalTokens)
+	tokens := int(result.TotalTokens)
+	ToolTokenCache.Set(toolsJSONStr, tokens)
+	return int64(tokens)
 }
 
 // =============================================================================

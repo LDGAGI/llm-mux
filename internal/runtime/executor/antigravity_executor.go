@@ -558,19 +558,21 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 	if stream {
 		path = antigravityStreamPath
 	}
-	var requestURL strings.Builder
-	requestURL.WriteString(base)
-	requestURL.WriteString(path)
+	ub := GetURLBuilder()
+	defer ub.Release()
+	ub.Grow(128) // estimate URL length
+	ub.WriteString(base)
+	ub.WriteString(path)
 	if stream {
 		if alt != "" {
-			requestURL.WriteString("?$alt=")
-			requestURL.WriteString(url.QueryEscape(alt))
+			ub.WriteString("?$alt=")
+			ub.WriteString(url.QueryEscape(alt))
 		} else {
-			requestURL.WriteString("?alt=sse")
+			ub.WriteString("?alt=sse")
 		}
 	} else if alt != "" {
-		requestURL.WriteString("?$alt=")
-		requestURL.WriteString(url.QueryEscape(alt))
+		ub.WriteString("?$alt=")
+		ub.WriteString(url.QueryEscape(alt))
 	}
 
 	// Extract project_id from auth metadata if available
@@ -604,7 +606,7 @@ func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyau
 		payload = []byte(strJSON)
 	}
 
-	httpReq, errReq := http.NewRequestWithContext(ctx, http.MethodPost, requestURL.String(), bytes.NewReader(payload))
+	httpReq, errReq := http.NewRequestWithContext(ctx, http.MethodPost, ub.String(), bytes.NewReader(payload))
 	if errReq != nil {
 		return nil, errReq
 	}

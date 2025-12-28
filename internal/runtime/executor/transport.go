@@ -4,6 +4,7 @@ package executor
 import (
 	"context"
 	"crypto/tls"
+	"golang.org/x/net/http2"
 	"net"
 	"net/http"
 	"net/url"
@@ -32,6 +33,17 @@ var TransportConfig = struct {
 	KeepAlive:             30 * time.Second,
 }
 
+// configureHTTP2 configures HTTP/2 settings for the transport.
+func configureHTTP2(transport *http.Transport) {
+	h2Transport, err := http2.ConfigureTransports(transport)
+	if err != nil {
+		return // fallback to default HTTP/2
+	}
+	h2Transport.ReadIdleTimeout = 30 * time.Second
+	h2Transport.PingTimeout = 15 * time.Second
+	h2Transport.StrictMaxConcurrentStreams = true
+}
+
 // SharedTransport is the default HTTP transport for direct connections.
 // Used when no proxy is configured and no context RoundTripper is provided.
 var SharedTransport = &http.Transport{
@@ -53,9 +65,13 @@ var SharedTransport = &http.Transport{
 	},
 }
 
+func init() {
+	configureHTTP2(SharedTransport)
+}
+
 // ProxyTransport creates an HTTP transport with proxy configuration.
 func ProxyTransport(proxyURL *url.URL) *http.Transport {
-	return &http.Transport{
+	transport := &http.Transport{
 		Proxy:                 http.ProxyURL(proxyURL),
 		MaxIdleConns:          TransportConfig.MaxIdleConns,
 		MaxIdleConnsPerHost:   TransportConfig.MaxIdleConnsPerHost,
@@ -70,11 +86,13 @@ func ProxyTransport(proxyURL *url.URL) *http.Transport {
 			MinVersion: tls.VersionTLS12,
 		},
 	}
+	configureHTTP2(transport)
+	return transport
 }
 
 // SOCKS5Transport creates an HTTP transport with SOCKS5 dialer.
 func SOCKS5Transport(dialFunc func(network, addr string) (net.Conn, error)) *http.Transport {
-	return &http.Transport{
+	transport := &http.Transport{
 		DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
 			return dialFunc(network, addr)
 		},
@@ -90,4 +108,6 @@ func SOCKS5Transport(dialFunc func(network, addr string) (net.Conn, error)) *htt
 			MinVersion: tls.VersionTLS12,
 		},
 	}
+	configureHTTP2(transport)
+	return transport
 }
