@@ -33,13 +33,8 @@ var (
 )
 
 // =============================================================================
-// Stream Conversion Infrastructure
+// Stream Helpers
 // =============================================================================
-
-// EventPreprocessor is called before each event is converted.
-// It allows format-specific state tracking and event modification.
-// Returns true if the event should be skipped (not converted).
-type EventPreprocessor func(event *ir.UnifiedEvent, state *StreamContext) (skip bool)
 
 // extractUsageFromEvents extracts usage from IR events (typically from Finish event).
 // Returns nil if no usage is found in events.
@@ -50,105 +45,6 @@ func extractUsageFromEvents(events []ir.UnifiedEvent) *ir.Usage {
 		}
 	}
 	return nil
-}
-
-// convertEventsToOpenAI converts IR events to OpenAI format chunks.
-// This consolidates the repeated openai/cline case logic.
-func convertEventsToOpenAI(events []ir.UnifiedEvent, model, messageID string, state *StreamContext, preprocessor EventPreprocessor) ([][]byte, error) {
-	chunks := make([][]byte, 0, len(events))
-
-	for i := range events {
-		event := &events[i]
-
-		// Apply preprocessor if provided
-		if preprocessor != nil {
-			if skip := preprocessor(event, state); skip {
-				continue
-			}
-		}
-
-		// Determine tool call index
-		idx := 0
-		if event.Type == ir.EventTypeToolCall {
-			idx = state.ToolCallIndex
-			state.ToolCallIndex++
-		}
-
-		chunk, err := from_ir.ToOpenAIChunk(*event, model, messageID, idx)
-		if err != nil {
-			return nil, err
-		}
-		if chunk != nil {
-			chunks = append(chunks, chunk)
-		}
-	}
-	return chunks, nil
-}
-
-// convertEventsToClaude converts IR events to Claude format chunks.
-func convertEventsToClaude(events []ir.UnifiedEvent, model, messageID string, state *StreamContext, preprocessor EventPreprocessor) ([][]byte, error) {
-	chunks := make([][]byte, 0, len(events))
-
-	if state.ClaudeState == nil {
-		state.ClaudeState = from_ir.NewClaudeStreamState()
-	}
-
-	for _, event := range events {
-		// Apply preprocessor if provided
-		if preprocessor != nil {
-			if skip := preprocessor(&event, state); skip {
-				continue
-			}
-		}
-
-		claudeChunks, err := from_ir.ToClaudeSSE(event, model, messageID, state.ClaudeState)
-		if err != nil {
-			return nil, err
-		}
-		if claudeChunks != nil {
-			chunks = append(chunks, claudeChunks)
-		}
-	}
-	return chunks, nil
-}
-
-// convertEventsToOllama converts IR events to Ollama format chunks.
-func convertEventsToOllama(events []ir.UnifiedEvent, model string, preprocessor EventPreprocessor, state *StreamContext) ([][]byte, error) {
-	chunks := make([][]byte, 0, len(events))
-
-	for _, event := range events {
-		// Apply preprocessor if provided (even for Ollama, for consistency)
-		if preprocessor != nil {
-			if skip := preprocessor(&event, state); skip {
-				continue
-			}
-		}
-
-		chunk, err := from_ir.ToOllamaChatChunk(event, model)
-		if err != nil {
-			return nil, err
-		}
-		if chunk != nil {
-			chunks = append(chunks, chunk)
-		}
-	}
-	return chunks, nil
-}
-
-// convertEventsToGemini converts IR events to Gemini format chunks.
-func convertEventsToGemini(events []ir.UnifiedEvent, model string) ([][]byte, error) {
-	chunks := make([][]byte, 0, len(events))
-
-	for _, event := range events {
-		chunk, err := from_ir.ToGeminiChunk(event, model)
-		if err != nil {
-			return nil, err
-		}
-		if chunk != nil {
-			chunks = append(chunks, chunk)
-		}
-	}
-	return chunks, nil
 }
 
 // =============================================================================
@@ -611,84 +507,6 @@ func hasMultipleCandidates(response []byte) bool {
 	parsed, _ := ir.UnwrapAntigravityEnvelope(response)
 	// Check if candidates.1 exists (0-indexed, so .1 means 2nd element)
 	return parsed.Get("candidates.1").Exists()
-}
-
-// OpenAIStreamState maintains state for OpenAI → OpenAI streaming conversions.
-type OpenAIStreamState struct {
-	ReasoningCharsAccum int // Track accumulated reasoning characters for token estimation
-}
-
-// TranslateOpenAIResponseStreamWithUsage converts OpenAI streaming chunk and extracts usage.
-// This eliminates duplicate parsing by returning both translated chunks and usage in one operation.
-func TranslateOpenAIResponseStreamWithUsage(cfg *config.Config, to sdktranslator.Format, openaiChunk []byte, model string, messageID string, state *OpenAIStreamState) (*StreamTranslationResult, error) {
-	// Step 1: Parse OpenAI chunk to IR events
-	events, err := to_ir.ParseOpenAIChunk(openaiChunk)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(events) == 0 {
-		return &StreamTranslationResult{}, nil
-	}
-
-	// Extract usage from events before conversion
-	usage := extractUsageFromEvents(events)
-
-	// Step 2: Initialize unified state from legacy state
-	if state == nil {
-		state = &OpenAIStreamState{}
-	}
-	ss := &StreamContext{
-		ClaudeState:         from_ir.NewClaudeStreamState(),
-		ReasoningCharsAccum: state.ReasoningCharsAccum,
-	}
-
-	// Step 3: Convert using unified helpers
-	toStr := to.String()
-	var chunks [][]byte
-
-	switch toStr {
-	case "openai", "cline":
-		chunks = make([][]byte, 0, len(events))
-		for i := range events {
-			event := &events[i]
-			// Apply openai preprocessor logic for reasoning tracking
-			if event.Type == ir.EventTypeReasoning && event.Reasoning != "" {
-				ss.ReasoningCharsAccum += len(event.Reasoning)
-			}
-
-			// On finish, ensure reasoning_tokens is set if we had reasoning content
-			if event.Type == ir.EventTypeFinish && ss.ReasoningCharsAccum > 0 {
-				if event.Usage == nil {
-					event.Usage = &ir.Usage{}
-				}
-				if event.Usage.ThoughtsTokenCount == 0 {
-					event.Usage.ThoughtsTokenCount = int32((ss.ReasoningCharsAccum + 2) / 3)
-				}
-			}
-			idx := event.ToolCallIndex
-			chunk, err := from_ir.ToOpenAIChunk(*event, model, messageID, idx)
-			if err != nil {
-				return nil, err
-			}
-			if chunk != nil {
-				chunks = append(chunks, chunk)
-			}
-		}
-	case "gemini", "gemini-cli":
-		chunks, err = convertEventsToGemini(events, model)
-	case "ollama":
-		chunks, err = convertEventsToOllama(events, model, nil, ss)
-	case "claude":
-		chunks, err = convertEventsToClaude(events, model, messageID, ss, nil)
-	default:
-		return &StreamTranslationResult{}, nil
-	}
-
-	// Sync state back
-	state.ReasoningCharsAccum = ss.ReasoningCharsAccum
-
-	return &StreamTranslationResult{Chunks: chunks, Usage: usage}, err
 }
 
 // TranslateTokenCount converts token count response to target format.

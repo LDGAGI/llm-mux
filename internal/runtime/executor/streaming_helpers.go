@@ -30,6 +30,7 @@ import (
 
 	"github.com/nghyane/llm-mux/internal/config"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
+	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
 	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	log "github.com/sirupsen/logrus"
@@ -374,14 +375,10 @@ func NewSimpleStreamProcessor(fn func(line []byte) (chunks [][]byte, usage *ir.U
 // =============================================================================
 
 // OpenAIStreamProcessor implements StreamProcessor for OpenAI-compatible APIs.
-// It uses TranslateOpenAIResponseStreamWithUsage for translation and supports
-// optional preprocessing for provider-specific transformations.
+// It uses StreamTranslator for translation (unified architecture).
 type OpenAIStreamProcessor struct {
-	cfg         *config.Config
-	from        sdktranslator.Format
-	model       string
-	messageID   string
-	streamState *OpenAIStreamState
+	translator *StreamTranslator
+	ctx        *StreamContext
 	// Preprocess is an optional function to transform payload before translation.
 	// It receives the raw line and firstChunk flag, returns modified payload.
 	// If it returns nil, the line is skipped.
@@ -391,13 +388,11 @@ type OpenAIStreamProcessor struct {
 
 // NewOpenAIStreamProcessor creates a new OpenAI-compatible stream processor.
 func NewOpenAIStreamProcessor(cfg *config.Config, from sdktranslator.Format, model, messageID string) *OpenAIStreamProcessor {
+	ctx := NewStreamContext()
 	return &OpenAIStreamProcessor{
-		cfg:         cfg,
-		from:        from,
-		model:       model,
-		messageID:   messageID,
-		streamState: &OpenAIStreamState{},
-		firstChunk:  true,
+		translator: NewStreamTranslator(cfg, sdktranslator.FromString("openai"), from.String(), model, messageID, ctx),
+		ctx:        ctx,
+		firstChunk: true,
 	}
 }
 
@@ -412,7 +407,18 @@ func (p *OpenAIStreamProcessor) ProcessLine(line []byte) ([][]byte, *ir.Usage, e
 	}
 	p.firstChunk = false // Always update after processing a line
 
-	result, err := TranslateOpenAIResponseStreamWithUsage(p.cfg, p.from, bytes.Clone(payload), p.model, p.messageID, p.streamState)
+	// Parse OpenAI chunk to IR events
+	events, err := to_ir.ParseOpenAIChunk(bytes.Clone(payload))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if len(events) == 0 {
+		return nil, nil, nil
+	}
+
+	// Use StreamTranslator for conversion
+	result, err := p.translator.Translate(events)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -420,6 +426,13 @@ func (p *OpenAIStreamProcessor) ProcessLine(line []byte) ([][]byte, *ir.Usage, e
 }
 
 func (p *OpenAIStreamProcessor) ProcessDone() ([][]byte, error) {
-	result, _ := TranslateOpenAIResponseStreamWithUsage(p.cfg, p.from, []byte("[DONE]"), p.model, p.messageID, p.streamState)
-	return result.Chunks, nil
+	// Parse [DONE] signal to trigger any final events
+	events, _ := to_ir.ParseOpenAIChunk([]byte("[DONE]"))
+	if len(events) == 0 {
+		// Flush any buffered chunks
+		return p.translator.Flush(), nil
+	}
+	result, _ := p.translator.Translate(events)
+	flushed := p.translator.Flush()
+	return append(result.Chunks, flushed...), nil
 }
