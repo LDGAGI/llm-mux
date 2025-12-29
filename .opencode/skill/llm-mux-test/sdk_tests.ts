@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-/// <reference types="bun-types" />
 /**
  * llm-mux test via OpenCode SDK
  * Multi-turn conversation with tool usage
  */
+declare const process: { exit(code: number): never };
 import { createOpencode, type OpencodeClient } from "@opencode-ai/sdk";
 
 const LLM_MUX_URL = "http://localhost:8318";
