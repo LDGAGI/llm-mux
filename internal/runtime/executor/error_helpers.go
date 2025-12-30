@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
+	"github.com/nghyane/llm-mux/internal/provider"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -41,7 +41,7 @@ type StatusError struct {
 	code       int
 	msg        string
 	retryAfter *time.Duration
-	category   cliproxyauth.ErrorCategory
+	category   provider.ErrorCategory
 }
 
 func (e StatusError) Error() string {
@@ -55,7 +55,7 @@ func (e StatusError) StatusCode() int { return e.code }
 
 func (e StatusError) RetryAfter() *time.Duration { return e.retryAfter }
 
-func (e StatusError) Category() cliproxyauth.ErrorCategory { return e.category }
+func (e StatusError) Category() provider.ErrorCategory { return e.category }
 
 func (e StatusError) Unwrap() error { return nil }
 
@@ -64,7 +64,7 @@ func NewStatusError(code int, msg string, retryAfter *time.Duration) StatusError
 		code:       code,
 		msg:        msg,
 		retryAfter: retryAfter,
-		category:   cliproxyauth.CategorizeError(code, msg),
+		category:   provider.CategorizeError(code, msg),
 	}
 }
 

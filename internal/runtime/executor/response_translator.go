@@ -7,10 +7,10 @@ package executor
 
 import (
 	"github.com/nghyane/llm-mux/internal/config"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/translator/from_ir"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	"github.com/tidwall/gjson"
 )
 
@@ -129,7 +129,7 @@ func parseGeminiCLIResponse(response []byte) (*ParsedResponse, error) {
 //   - to: Target format
 //   - response: Raw response bytes
 //   - model: Model name for response metadata
-func TranslateResponseNonStream(cfg *config.Config, from, to sdktranslator.Format, response []byte, model string) ([]byte, error) {
+func TranslateResponseNonStream(cfg *config.Config, from, to provider.Format, response []byte, model string) ([]byte, error) {
 	fromStr := from.String()
 	toStr := to.String()
 

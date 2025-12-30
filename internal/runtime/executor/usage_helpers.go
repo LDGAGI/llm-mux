@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	"github.com/nghyane/llm-mux/sdk/cliproxy/usage"
+	"github.com/nghyane/llm-mux/internal/usage"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -28,7 +28,7 @@ type usageReporter struct {
 	once        sync.Once
 }
 
-func newUsageReporter(ctx context.Context, provider, model string, auth *cliproxyauth.Auth) *usageReporter {
+func newUsageReporter(ctx context.Context, provider, model string, auth *provider.Auth) *usageReporter {
 	apiKey := apiKeyFromContext(ctx)
 	reporter := &usageReporter{
 		provider:    provider,
@@ -74,10 +74,10 @@ func isUserError(err error) bool {
 		return sc.StatusCode() == 400
 	}
 	type categorizer interface {
-		Category() cliproxyauth.ErrorCategory
+		Category() provider.ErrorCategory
 	}
 	if cat, ok := err.(categorizer); ok {
-		return cat.Category() == cliproxyauth.CategoryUserError
+		return cat.Category() == provider.CategoryUserError
 	}
 	return false
 }
@@ -147,7 +147,7 @@ func apiKeyFromContext(ctx context.Context) string {
 	return ""
 }
 
-func resolveUsageSource(auth *cliproxyauth.Auth, ctxAPIKey string) string {
+func resolveUsageSource(auth *provider.Auth, ctxAPIKey string) string {
 	if auth != nil {
 		provider := strings.TrimSpace(auth.Provider)
 		if strings.EqualFold(provider, "gemini-cli") {

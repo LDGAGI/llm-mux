@@ -13,8 +13,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/nghyane/llm-mux/internal/auth/login"
 	"github.com/nghyane/llm-mux/internal/config"
-	sdkAuth "github.com/nghyane/llm-mux/sdk/auth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -42,7 +42,7 @@ func DoClineLogin(cfg *config.Config, options *LoginOptions) {
 		}
 	}
 
-	authOpts := &sdkAuth.LoginOptions{
+	authOpts := &login.LoginOptions{
 		NoBrowser: true, // Cline doesn't use browser-based OAuth
 		Metadata:  map[string]string{},
 		Prompt:    promptFn,
@@ -50,7 +50,7 @@ func DoClineLogin(cfg *config.Config, options *LoginOptions) {
 
 	_, savedPath, err := manager.Login(context.Background(), "cline", cfg, authOpts)
 	if err != nil {
-		var emailErr *sdkAuth.EmailRequiredError
+		var emailErr *login.EmailRequiredError
 		if errors.As(err, &emailErr) {
 			log.Error(emailErr.Error())
 			return

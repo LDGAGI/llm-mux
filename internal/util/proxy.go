@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/nghyane/llm-mux/sdk/config"
+	"github.com/nghyane/llm-mux/internal/config"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/proxy"
 )

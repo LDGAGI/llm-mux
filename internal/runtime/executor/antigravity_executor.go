@@ -16,12 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/nghyane/llm-mux/internal/config"
 	"github.com/nghyane/llm-mux/internal/oauth"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/util"
 
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -54,9 +52,9 @@ func NewAntigravityExecutor(cfg *config.Config) *AntigravityExecutor {
 
 func (e *AntigravityExecutor) Identifier() string { return antigravityAuthType }
 
-func (e *AntigravityExecutor) PrepareRequest(_ *http.Request, _ *cliproxyauth.Auth) error { return nil }
+func (e *AntigravityExecutor) PrepareRequest(_ *http.Request, _ *provider.Auth) error { return nil }
 
-func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
+func (e *AntigravityExecutor) Execute(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (resp provider.Response, err error) {
 	token, updatedAuth, errToken := e.ensureAccessToken(ctx, auth)
 	if errToken != nil {
 		return resp, errToken
@@ -131,15 +129,15 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 		switch action {
 		case RetryActionSuccess:
 			reporter.publish(ctx, extractUsageFromGeminiResponse(bodyBytes))
-			fromFormat := sdktranslator.FromString("gemini-cli")
+			fromFormat := provider.FromString("gemini-cli")
 			translatedResp, errTranslateResp := TranslateResponseNonStream(e.cfg, fromFormat, from, bodyBytes, req.Model)
 			if errTranslateResp != nil {
 				return resp, fmt.Errorf("failed to translate response: %w", errTranslateResp)
 			}
 			if translatedResp != nil {
-				resp = cliproxyexecutor.Response{Payload: translatedResp}
+				resp = provider.Response{Payload: translatedResp}
 			} else {
-				resp = cliproxyexecutor.Response{Payload: bodyBytes}
+				resp = provider.Response{Payload: bodyBytes}
 			}
 			reporter.ensurePublished(ctx)
 			return resp, nil
@@ -173,7 +171,7 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 	return resp, err
 }
 
-func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (stream <-chan cliproxyexecutor.StreamChunk, err error) {
+func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (stream <-chan provider.StreamChunk, err error) {
 	ctx = context.WithValue(ctx, altContextKey{}, "")
 
 	token, updatedAuth, errToken := e.ensureAccessToken(ctx, auth)
@@ -297,7 +295,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	return nil, err
 }
 
-func (e *AntigravityExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+func (e *AntigravityExecutor) Refresh(ctx context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	if auth == nil {
 		return auth, nil
 	}
@@ -308,11 +306,11 @@ func (e *AntigravityExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Au
 	return updated, nil
 }
 
-func (e *AntigravityExecutor) CountTokens(context.Context, *cliproxyauth.Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-	return cliproxyexecutor.Response{}, NewStatusError(http.StatusNotImplemented, "count tokens not supported", nil)
+func (e *AntigravityExecutor) CountTokens(context.Context, *provider.Auth, provider.Request, provider.Options) (provider.Response, error) {
+	return provider.Response{}, NewStatusError(http.StatusNotImplemented, "count tokens not supported", nil)
 }
 
-func FetchAntigravityModels(ctx context.Context, auth *cliproxyauth.Auth, cfg *config.Config) []*registry.ModelInfo {
+func FetchAntigravityModels(ctx context.Context, auth *provider.Auth, cfg *config.Config) []*registry.ModelInfo {
 	exec := &AntigravityExecutor{cfg: cfg}
 	token, updatedAuth, errToken := exec.ensureAccessToken(ctx, auth)
 	if errToken != nil || token == "" {
@@ -338,10 +336,10 @@ func FetchAntigravityModels(ctx context.Context, auth *cliproxyauth.Auth, cfg *c
 
 type tokenRefreshResult struct {
 	token string
-	auth  *cliproxyauth.Auth
+	auth  *provider.Auth
 }
 
-func (e *AntigravityExecutor) ensureAccessToken(ctx context.Context, auth *cliproxyauth.Auth) (string, *cliproxyauth.Auth, error) {
+func (e *AntigravityExecutor) ensureAccessToken(ctx context.Context, auth *provider.Auth) (string, *provider.Auth, error) {
 	if auth == nil {
 		return "", nil, NewStatusError(http.StatusUnauthorized, "missing auth", nil)
 	}
@@ -377,7 +375,7 @@ func (e *AntigravityExecutor) ensureAccessToken(ctx context.Context, auth *clipr
 	return res.token, res.auth, nil
 }
 
-func (e *AntigravityExecutor) refreshToken(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+func (e *AntigravityExecutor) refreshToken(ctx context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	if auth == nil {
 		return nil, NewStatusError(http.StatusUnauthorized, "missing auth", nil)
 	}
@@ -458,7 +456,7 @@ func (e *AntigravityExecutor) refreshToken(ctx context.Context, auth *cliproxyau
 	return auth, nil
 }
 
-func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *cliproxyauth.Auth, token, modelName string, payload []byte, stream bool, alt, baseURL string) (*http.Request, error) {
+func (e *AntigravityExecutor) buildRequest(ctx context.Context, auth *provider.Auth, token, modelName string, payload []byte, stream bool, alt, baseURL string) (*http.Request, error) {
 	if token == "" {
 		return nil, NewStatusError(http.StatusUnauthorized, "missing access token", nil)
 	}
@@ -595,7 +593,7 @@ func int64Value(value any) (int64, bool) {
 	return 0, false
 }
 
-func buildBaseURL(auth *cliproxyauth.Auth) string {
+func buildBaseURL(auth *provider.Auth) string {
 	if baseURLs := antigravityBaseURLFallbackOrder(auth); len(baseURLs) > 0 {
 		return baseURLs[0]
 	}
@@ -613,7 +611,7 @@ func resolveHost(base string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(base, "https://"), "http://")
 }
 
-func resolveUserAgent(auth *cliproxyauth.Auth) string {
+func resolveUserAgent(auth *provider.Auth) string {
 	if auth != nil {
 		if auth.Attributes != nil {
 			if ua := strings.TrimSpace(auth.Attributes["user_agent"]); ua != "" {
@@ -629,7 +627,7 @@ func resolveUserAgent(auth *cliproxyauth.Auth) string {
 	return DefaultAntigravityUserAgent
 }
 
-func antigravityBaseURLFallbackOrder(auth *cliproxyauth.Auth) []string {
+func antigravityBaseURLFallbackOrder(auth *provider.Auth) []string {
 	if base := resolveCustomAntigravityBaseURL(auth); base != "" {
 		return []string{base}
 	}
@@ -639,7 +637,7 @@ func antigravityBaseURLFallbackOrder(auth *cliproxyauth.Auth) []string {
 	}
 }
 
-func resolveCustomAntigravityBaseURL(auth *cliproxyauth.Auth) string {
+func resolveCustomAntigravityBaseURL(auth *provider.Auth) string {
 	if auth == nil {
 		return ""
 	}

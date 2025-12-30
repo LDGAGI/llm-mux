@@ -15,11 +15,9 @@ import (
 	"github.com/nghyane/llm-mux/internal/config"
 	"github.com/nghyane/llm-mux/internal/misc"
 	"github.com/nghyane/llm-mux/internal/oauth"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/runtime/geminicli"
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/sjson"
 	"golang.org/x/oauth2"
@@ -47,9 +45,9 @@ func NewGeminiCLIExecutor(cfg *config.Config) *GeminiCLIExecutor {
 
 func (e *GeminiCLIExecutor) Identifier() string { return "gemini-cli" }
 
-func (e *GeminiCLIExecutor) PrepareRequest(_ *http.Request, _ *cliproxyauth.Auth) error { return nil }
+func (e *GeminiCLIExecutor) PrepareRequest(_ *http.Request, _ *provider.Auth) error { return nil }
 
-func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
+func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (resp provider.Response, err error) {
 	tokenSource, baseTokenData, err := prepareGeminiCLITokenSource(ctx, e.cfg, auth)
 	if err != nil {
 		return resp, err
@@ -140,15 +138,15 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 		if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
 			reporter.publish(ctx, extractUsageFromGeminiResponse(data))
 
-			fromFormat := sdktranslator.FromString("gemini-cli")
+			fromFormat := provider.FromString("gemini-cli")
 			translatedResp, err := TranslateResponseNonStream(e.cfg, fromFormat, from, data, attemptModel)
 			if err != nil {
 				return resp, err
 			}
 			if translatedResp != nil {
-				resp = cliproxyexecutor.Response{Payload: translatedResp}
+				resp = provider.Response{Payload: translatedResp}
 			} else {
-				resp = cliproxyexecutor.Response{Payload: data}
+				resp = provider.Response{Payload: data}
 			}
 			return resp, nil
 		}
@@ -186,7 +184,7 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 	return resp, err
 }
 
-func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (stream <-chan cliproxyexecutor.StreamChunk, err error) {
+func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (stream <-chan provider.StreamChunk, err error) {
 	tokenSource, baseTokenData, err := prepareGeminiCLITokenSource(ctx, e.cfg, auth)
 	if err != nil {
 		return nil, err
@@ -313,10 +311,10 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	return nil, err
 }
 
-func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	tokenSource, baseTokenData, err := prepareGeminiCLITokenSource(ctx, e.cfg, auth)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 
 	from := opts.SourceFormat
@@ -332,7 +330,7 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 		attemptModel := models[idx]
 		payload, errTranslate := TranslateToGeminiCLI(e.cfg, from, attemptModel, req.Payload, false, req.Metadata)
 		if errTranslate != nil {
-			return cliproxyexecutor.Response{}, fmt.Errorf("failed to translate request: %w", errTranslate)
+			return provider.Response{}, fmt.Errorf("failed to translate request: %w", errTranslate)
 		}
 
 		payload = deleteJSONField(payload, "project")
@@ -341,7 +339,7 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 
 		tok, errTok := tokenSource.Token()
 		if errTok != nil {
-			return cliproxyexecutor.Response{}, wrapTokenError(errTok)
+			return provider.Response{}, wrapTokenError(errTok)
 		}
 		updateGeminiCLITokenMetadata(auth, baseTokenData, tok)
 
@@ -360,7 +358,7 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 
 		reqHTTP, errReq := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 		if errReq != nil {
-			return cliproxyexecutor.Response{}, errReq
+			return provider.Response{}, errReq
 		}
 		reqHTTP.Header.Set("Content-Type", "application/json")
 		reqHTTP.Header.Set("Authorization", "Bearer "+tok.AccessToken)
@@ -370,17 +368,17 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 		resp, errDo := httpClient.Do(reqHTTP)
 		if errDo != nil {
 			if errors.Is(errDo, context.DeadlineExceeded) {
-				return cliproxyexecutor.Response{}, NewTimeoutError("request timed out")
+				return provider.Response{}, NewTimeoutError("request timed out")
 			}
-			return cliproxyexecutor.Response{}, errDo
+			return provider.Response{}, errDo
 		}
 		data, errRead := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if errRead != nil {
-			return cliproxyexecutor.Response{}, errRead
+			return provider.Response{}, errRead
 		}
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return cliproxyexecutor.Response{Payload: data}, nil
+			return provider.Response{Payload: data}, nil
 		}
 		lastStatus = resp.StatusCode
 		lastBody = append([]byte(nil), data...)
@@ -391,7 +389,7 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 			}
 			action, ctxErr := retrier.handleRateLimit(ctx, hasNextModel, data)
 			if ctxErr != nil {
-				return cliproxyexecutor.Response{}, ctxErr
+				return provider.Response{}, ctxErr
 			}
 			switch action {
 			case rateLimitActionContinue:
@@ -407,15 +405,15 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 	if lastStatus == 0 {
 		lastStatus = 429
 	}
-	return cliproxyexecutor.Response{}, newGeminiStatusErr(lastStatus, lastBody)
+	return provider.Response{}, newGeminiStatusErr(lastStatus, lastBody)
 }
 
-func (e *GeminiCLIExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+func (e *GeminiCLIExecutor) Refresh(ctx context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	_ = ctx
 	return auth, nil
 }
 
-func prepareGeminiCLITokenSource(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth) (oauth2.TokenSource, map[string]any, error) {
+func prepareGeminiCLITokenSource(ctx context.Context, cfg *config.Config, auth *provider.Auth) (oauth2.TokenSource, map[string]any, error) {
 	metadata := geminiOAuthMetadata(auth)
 	if auth == nil || metadata == nil {
 		return nil, nil, fmt.Errorf("gemini-cli auth metadata missing")
@@ -473,7 +471,7 @@ func prepareGeminiCLITokenSource(ctx context.Context, cfg *config.Config, auth *
 	return oauth2.ReuseTokenSource(currentToken, src), base, nil
 }
 
-func updateGeminiCLITokenMetadata(auth *cliproxyauth.Auth, base map[string]any, tok *oauth2.Token) {
+func updateGeminiCLITokenMetadata(auth *provider.Auth, base map[string]any, tok *oauth2.Token) {
 	if auth == nil || tok == nil {
 		return
 	}
@@ -531,7 +529,7 @@ func buildGeminiTokenFields(tok *oauth2.Token, merged map[string]any) map[string
 	return fields
 }
 
-func resolveGeminiProjectID(auth *cliproxyauth.Auth) string {
+func resolveGeminiProjectID(auth *provider.Auth) string {
 	if auth == nil {
 		return ""
 	}
@@ -539,7 +537,7 @@ func resolveGeminiProjectID(auth *cliproxyauth.Auth) string {
 		if virtual, ok := auth.Runtime.(*geminicli.VirtualCredential); ok && virtual != nil {
 			return strings.TrimSpace(virtual.ProjectID)
 		}
-		if rd, ok := auth.Runtime.(*cliproxyauth.AuthRuntimeData); ok && rd != nil {
+		if rd, ok := auth.Runtime.(*provider.AuthRuntimeData); ok && rd != nil {
 			if virtual, ok := rd.ProviderData.(*geminicli.VirtualCredential); ok && virtual != nil {
 				return strings.TrimSpace(virtual.ProjectID)
 			}
@@ -548,7 +546,7 @@ func resolveGeminiProjectID(auth *cliproxyauth.Auth) string {
 	return strings.TrimSpace(stringValue(auth.Metadata, "project_id"))
 }
 
-func geminiOAuthMetadata(auth *cliproxyauth.Auth) map[string]any {
+func geminiOAuthMetadata(auth *provider.Auth) map[string]any {
 	if auth == nil {
 		return nil
 	}
@@ -560,7 +558,7 @@ func geminiOAuthMetadata(auth *cliproxyauth.Auth) map[string]any {
 	return auth.Metadata
 }
 
-func newHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
+func newHTTPClient(ctx context.Context, cfg *config.Config, auth *provider.Auth, timeout time.Duration) *http.Client {
 	return newProxyAwareHTTPClient(ctx, cfg, auth, timeout)
 }
 
@@ -645,7 +643,7 @@ func wrapTokenError(err error) error {
 	return NewStatusError(http.StatusUnauthorized, msg, nil)
 }
 
-func FetchGeminiCLIModels(ctx context.Context, auth *cliproxyauth.Auth, cfg *config.Config) []*registry.ModelInfo {
+func FetchGeminiCLIModels(ctx context.Context, auth *provider.Auth, cfg *config.Config) []*registry.ModelInfo {
 	tokenSource, _, err := prepareGeminiCLITokenSource(ctx, cfg, auth)
 	if err != nil {
 		log.Errorf("gemini-cli: failed to prepare token source: %v", err)

@@ -12,13 +12,11 @@ import (
 	"time"
 
 	"github.com/nghyane/llm-mux/internal/config"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/sjson"
 	"golang.org/x/oauth2"
@@ -57,9 +55,9 @@ func (p *geminiStreamProcessor) ProcessDone() ([][]byte, error) {
 
 func (e *GeminiExecutor) Identifier() string { return "gemini" }
 
-func (e *GeminiExecutor) PrepareRequest(_ *http.Request, _ *cliproxyauth.Auth) error { return nil }
+func (e *GeminiExecutor) PrepareRequest(_ *http.Request, _ *provider.Auth) error { return nil }
 
-func (e *GeminiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
+func (e *GeminiExecutor) Execute(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (resp provider.Response, err error) {
 	apiKey, bearer := geminiCreds(auth)
 
 	reporter := newUsageReporter(ctx, e.Identifier(), req.Model, auth)
@@ -136,20 +134,20 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	}
 	reporter.publish(ctx, extractUsageFromGeminiResponse(data))
 
-	fromFormat := sdktranslator.FromString("gemini")
+	fromFormat := provider.FromString("gemini")
 	translatedResp, err := TranslateResponseNonStream(e.cfg, fromFormat, from, data, req.Model)
 	if err != nil {
 		return resp, err
 	}
 	if translatedResp != nil {
-		resp = cliproxyexecutor.Response{Payload: translatedResp}
+		resp = provider.Response{Payload: translatedResp}
 	} else {
-		resp = cliproxyexecutor.Response{Payload: data}
+		resp = provider.Response{Payload: data}
 	}
 	return resp, nil
 }
 
-func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (stream <-chan cliproxyexecutor.StreamChunk, err error) {
+func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (stream <-chan provider.StreamChunk, err error) {
 	apiKey, bearer := geminiCreds(auth)
 
 	reporter := newUsageReporter(ctx, e.Identifier(), req.Model, auth)
@@ -214,7 +212,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		_ = httpResp.Body.Close()
 		return nil, result.Error
 	}
-	out := make(chan cliproxyexecutor.StreamChunk, 32)
+	out := make(chan provider.StreamChunk, 32)
 	stream = out
 
 	estimatedInputTokens := translation.EstimatedInputTokens
@@ -262,14 +260,14 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 				if flushed, _ := processor.ProcessDone(); len(flushed) > 0 {
 					for _, chunk := range flushed {
 						select {
-						case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+						case out <- provider.StreamChunk{Payload: chunk}:
 						case <-ctx.Done():
 							return
 						}
 					}
 				}
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Err: err}:
+				case out <- provider.StreamChunk{Err: err}:
 				case <-ctx.Done():
 				}
 				return
@@ -279,7 +277,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 			}
 			for _, chunk := range chunks {
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+				case out <- provider.StreamChunk{Payload: chunk}:
 				case <-ctx.Done():
 					return
 				}
@@ -288,7 +286,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		if errScan := scanner.Err(); errScan != nil {
 			reporter.publishFailure(ctx)
 			select {
-			case out <- cliproxyexecutor.StreamChunk{Err: errScan}:
+			case out <- provider.StreamChunk{Err: errScan}:
 			case <-ctx.Done():
 			}
 			return
@@ -296,7 +294,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		if flushed, _ := processor.ProcessDone(); len(flushed) > 0 {
 			for _, chunk := range flushed {
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+				case out <- provider.StreamChunk{Payload: chunk}:
 				case <-ctx.Done():
 					return
 				}
@@ -306,13 +304,13 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	return stream, nil
 }
 
-func (e *GeminiExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (e *GeminiExecutor) CountTokens(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	apiKey, bearer := geminiCreds(auth)
 
 	from := opts.SourceFormat
 	translatedReq, err := TranslateToGemini(e.cfg, from, req.Model, req.Payload, false, req.Metadata)
 	if err != nil {
-		return cliproxyexecutor.Response{}, fmt.Errorf("translate request: %w", err)
+		return provider.Response{}, fmt.Errorf("translate request: %w", err)
 	}
 	if budgetOverride, includeOverride, ok := util.GeminiThinkingFromMetadata(req.Metadata); ok && util.ModelSupportsThinking(req.Model) {
 		translatedReq = util.ApplyGeminiThinkingConfig(translatedReq, budgetOverride, includeOverride)
@@ -338,7 +336,7 @@ func (e *GeminiExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, requestBody)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if apiKey != "" {
@@ -352,25 +350,25 @@ func (e *GeminiExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return cliproxyexecutor.Response{}, NewTimeoutError("request timed out")
+			return provider.Response{}, NewTimeoutError("request timed out")
 		}
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Debugf("gemini executor: error status: %d, body: %s", resp.StatusCode, summarizeErrorBody(resp.Header.Get("Content-Type"), data))
-		return cliproxyexecutor.Response{}, NewStatusError(resp.StatusCode, string(data), nil)
+		return provider.Response{}, NewStatusError(resp.StatusCode, string(data), nil)
 	}
 
-	return cliproxyexecutor.Response{Payload: data}, nil
+	return provider.Response{Payload: data}, nil
 }
 
-func (e *GeminiExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+func (e *GeminiExecutor) Refresh(ctx context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	if auth == nil {
 		return nil, fmt.Errorf("gemini executor: auth is nil")
 	}
@@ -463,7 +461,7 @@ func (e *GeminiExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (
 	return auth, nil
 }
 
-func geminiCreds(a *cliproxyauth.Auth) (apiKey, bearer string) {
+func geminiCreds(a *provider.Auth) (apiKey, bearer string) {
 	token, _ := ExtractCreds(a, GeminiCredsConfig)
 	if a != nil && a.Attributes != nil {
 		apiKey = a.Attributes["api_key"]
@@ -472,7 +470,7 @@ func geminiCreds(a *cliproxyauth.Auth) (apiKey, bearer string) {
 	return
 }
 
-func resolveGeminiBaseURL(auth *cliproxyauth.Auth) string {
+func resolveGeminiBaseURL(auth *provider.Auth) string {
 	base := GeminiDefaultBaseURL
 	if auth != nil && auth.Attributes != nil {
 		if custom := strings.TrimSpace(auth.Attributes["base_url"]); custom != "" {
@@ -485,7 +483,7 @@ func resolveGeminiBaseURL(auth *cliproxyauth.Auth) string {
 	return base
 }
 
-func applyGeminiHeaders(req *http.Request, auth *cliproxyauth.Auth) {
+func applyGeminiHeaders(req *http.Request, auth *provider.Auth) {
 	var attrs map[string]string
 	if auth != nil {
 		attrs = auth.Attributes
@@ -493,7 +491,7 @@ func applyGeminiHeaders(req *http.Request, auth *cliproxyauth.Auth) {
 	util.ApplyCustomHeadersFromAttrs(req, attrs)
 }
 
-func FetchGeminiModels(ctx context.Context, auth *cliproxyauth.Auth, cfg *config.Config) []*registry.ModelInfo {
+func FetchGeminiModels(ctx context.Context, auth *provider.Auth, cfg *config.Config) []*registry.ModelInfo {
 	apiKey, bearer := geminiCreds(auth)
 	if apiKey == "" && bearer == "" {
 		return nil

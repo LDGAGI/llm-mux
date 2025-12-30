@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/nghyane/llm-mux/internal/auth/login"
 	"github.com/nghyane/llm-mux/internal/config"
-	sdkAuth "github.com/nghyane/llm-mux/sdk/auth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -39,7 +39,7 @@ func DoKiroLogin(cfg *config.Config, options *LoginOptions) {
 
 	manager := newAuthManager()
 
-	authOpts := &sdkAuth.LoginOptions{
+	authOpts := &login.LoginOptions{
 		NoBrowser: options.NoBrowser,
 		Metadata:  map[string]string{},
 		Prompt:    promptFn,

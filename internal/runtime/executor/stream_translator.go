@@ -4,15 +4,15 @@ import (
 	"strings"
 
 	"github.com/nghyane/llm-mux/internal/config"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/translator/from_ir"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 )
 
 // StreamTranslator handles format conversion with integrated buffering
 type StreamTranslator struct {
 	cfg            *config.Config
-	from           sdktranslator.Format
+	from           provider.Format
 	to             string
 	model          string
 	messageID      string
@@ -21,8 +21,7 @@ type StreamTranslator struct {
 	streamMetaSent bool
 }
 
-// NewStreamTranslator creates a translator with appropriate buffer strategy
-func NewStreamTranslator(cfg *config.Config, from sdktranslator.Format, to, model, messageID string, ctx *StreamContext) *StreamTranslator {
+func NewStreamTranslator(cfg *config.Config, from provider.Format, to, model, messageID string, ctx *StreamContext) *StreamTranslator {
 	st := &StreamTranslator{
 		cfg:       cfg,
 		from:      from,

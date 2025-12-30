@@ -6,8 +6,7 @@ import (
 	"time"
 
 	"github.com/nghyane/llm-mux/internal/config"
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
+	"github.com/nghyane/llm-mux/internal/provider"
 )
 
 type BaseExecutor struct {
@@ -18,26 +17,26 @@ func (b *BaseExecutor) Config() *config.Config {
 	return b.Cfg
 }
 
-func (b *BaseExecutor) PrepareRequest(_ *http.Request, _ *cliproxyauth.Auth) error {
+func (b *BaseExecutor) PrepareRequest(_ *http.Request, _ *provider.Auth) error {
 	return nil
 }
 
-func (b *BaseExecutor) NewHTTPClient(ctx context.Context, auth *cliproxyauth.Auth, timeout time.Duration) *http.Client {
+func (b *BaseExecutor) NewHTTPClient(ctx context.Context, auth *provider.Auth, timeout time.Duration) *http.Client {
 	return newProxyAwareHTTPClient(ctx, b.Cfg, auth, timeout)
 }
 
-func (b *BaseExecutor) NewUsageReporter(ctx context.Context, provider, model string, auth *cliproxyauth.Auth) *usageReporter {
-	return newUsageReporter(ctx, provider, model, auth)
+func (b *BaseExecutor) NewUsageReporter(ctx context.Context, prov, model string, auth *provider.Auth) *usageReporter {
+	return newUsageReporter(ctx, prov, model, auth)
 }
 
 func (b *BaseExecutor) ApplyPayloadConfig(model string, payload []byte) []byte {
 	return applyPayloadConfig(b.Cfg, model, payload)
 }
 
-func (b *BaseExecutor) RefreshNoOp(_ context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+func (b *BaseExecutor) RefreshNoOp(_ context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	return auth, nil
 }
 
-func (b *BaseExecutor) CountTokensNotSupported(provider string) (cliproxyexecutor.Response, error) {
-	return cliproxyexecutor.Response{}, NewNotImplementedError("count tokens not supported for " + provider)
+func (b *BaseExecutor) CountTokensNotSupported(prov string) (provider.Response, error) {
+	return provider.Response{}, NewNotImplementedError("count tokens not supported for " + prov)
 }

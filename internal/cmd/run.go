@@ -12,7 +12,7 @@ import (
 
 	"github.com/nghyane/llm-mux/internal/api"
 	"github.com/nghyane/llm-mux/internal/config"
-	"github.com/nghyane/llm-mux/sdk/cliproxy"
+	"github.com/nghyane/llm-mux/internal/service"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -24,7 +24,7 @@ import (
 //   - configPath: The path to the configuration file
 //   - localPassword: Optional password accepted for local management requests
 func StartService(cfg *config.Config, configPath string, localPassword string) {
-	builder := cliproxy.NewBuilder().
+	builder := service.NewBuilder().
 		WithConfig(cfg).
 		WithConfigPath(configPath).
 		WithLocalManagementPassword(localPassword)

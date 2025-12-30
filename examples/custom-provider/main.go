@@ -20,12 +20,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nghyane/llm-mux/internal/api"
+	"github.com/nghyane/llm-mux/internal/auth/login"
 	"github.com/nghyane/llm-mux/internal/config"
 	"github.com/nghyane/llm-mux/internal/logging"
-	sdkAuth "github.com/nghyane/llm-mux/sdk/auth"
-	"github.com/nghyane/llm-mux/sdk/cliproxy"
-	coreauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	clipexec "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
+	"github.com/nghyane/llm-mux/internal/provider"
+	"github.com/nghyane/llm-mux/internal/service"
 )
 
 const providerKey = "myprov"
@@ -43,7 +42,7 @@ type MyExecutor struct{}
 func (MyExecutor) Identifier() string { return providerKey }
 
 // PrepareRequest injects credentials into the HTTP request.
-func (MyExecutor) PrepareRequest(req *http.Request, a *coreauth.Auth) error {
+func (MyExecutor) PrepareRequest(req *http.Request, a *provider.Auth) error {
 	if req == nil || a == nil {
 		return nil
 	}
@@ -55,7 +54,7 @@ func (MyExecutor) PrepareRequest(req *http.Request, a *coreauth.Auth) error {
 	return nil
 }
 
-func buildHTTPClient(a *coreauth.Auth) *http.Client {
+func buildHTTPClient(a *provider.Auth) *http.Client {
 	if a == nil || strings.TrimSpace(a.ProxyURL) == "" {
 		return http.DefaultClient
 	}
@@ -66,7 +65,7 @@ func buildHTTPClient(a *coreauth.Auth) *http.Client {
 	return &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(u)}}
 }
 
-func upstreamEndpoint(a *coreauth.Auth) string {
+func upstreamEndpoint(a *provider.Auth) string {
 	if a != nil && a.Attributes != nil {
 		if ep := strings.TrimSpace(a.Attributes["endpoint"]); ep != "" {
 			return ep
@@ -76,13 +75,13 @@ func upstreamEndpoint(a *coreauth.Auth) string {
 	return "https://httpbin.org/post"
 }
 
-func (MyExecutor) Execute(ctx context.Context, a *coreauth.Auth, req clipexec.Request, opts clipexec.Options) (clipexec.Response, error) {
+func (MyExecutor) Execute(ctx context.Context, a *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	client := buildHTTPClient(a)
 	endpoint := upstreamEndpoint(a)
 
 	httpReq, errNew := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(req.Payload))
 	if errNew != nil {
-		return clipexec.Response{}, errNew
+		return provider.Response{}, errNew
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -91,28 +90,28 @@ func (MyExecutor) Execute(ctx context.Context, a *coreauth.Auth, req clipexec.Re
 
 	resp, errDo := client.Do(httpReq)
 	if errDo != nil {
-		return clipexec.Response{}, errDo
+		return provider.Response{}, errDo
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	return clipexec.Response{Payload: body}, nil
+	return provider.Response{Payload: body}, nil
 }
 
-func (MyExecutor) CountTokens(context.Context, *coreauth.Auth, clipexec.Request, clipexec.Options) (clipexec.Response, error) {
-	return clipexec.Response{}, notImplementedError{"count tokens not supported for " + providerKey}
+func (MyExecutor) CountTokens(context.Context, *provider.Auth, provider.Request, provider.Options) (provider.Response, error) {
+	return provider.Response{}, notImplementedError{"count tokens not supported for " + providerKey}
 }
 
-func (MyExecutor) ExecuteStream(_ context.Context, _ *coreauth.Auth, _ clipexec.Request, _ clipexec.Options) (<-chan clipexec.StreamChunk, error) {
-	ch := make(chan clipexec.StreamChunk, 1)
+func (MyExecutor) ExecuteStream(_ context.Context, _ *provider.Auth, _ provider.Request, _ provider.Options) (<-chan provider.StreamChunk, error) {
+	ch := make(chan provider.StreamChunk, 1)
 	go func() {
 		defer close(ch)
-		ch <- clipexec.StreamChunk{Payload: []byte("data: {\"ok\":true}\n\n")}
+		ch <- provider.StreamChunk{Payload: []byte("data: {\"ok\":true}\n\n")}
 	}()
 	return ch, nil
 }
 
-func (MyExecutor) Refresh(_ context.Context, a *coreauth.Auth) (*coreauth.Auth, error) {
+func (MyExecutor) Refresh(_ context.Context, a *provider.Auth) (*provider.Auth, error) {
 	return a, nil
 }
 
@@ -122,26 +121,26 @@ func main() {
 		panic(err)
 	}
 
-	tokenStore := sdkAuth.GetTokenStore()
+	tokenStore := login.GetTokenStore()
 	if dirSetter, ok := tokenStore.(interface{ SetBaseDir(string) }); ok {
 		dirSetter.SetBaseDir(cfg.AuthDir)
 	}
-	core := coreauth.NewManager(tokenStore, nil, nil)
+	core := provider.NewManager(tokenStore, nil, nil)
 	core.RegisterExecutor(MyExecutor{})
 
-	hooks := cliproxy.Hooks{
-		OnAfterStart: func(s *cliproxy.Service) {
+	hooks := service.Hooks{
+		OnAfterStart: func(s *service.Service) {
 			// Register demo models for the custom provider so they appear in /v1/models.
-			models := []*cliproxy.ModelInfo{{ID: "myprov-pro-1", Object: "model", Type: providerKey, DisplayName: "MyProv Pro 1"}}
+			models := []*service.ModelInfo{{ID: "myprov-pro-1", Object: "model", Type: providerKey, DisplayName: "MyProv Pro 1"}}
 			for _, a := range core.List() {
 				if strings.EqualFold(a.Provider, providerKey) {
-					cliproxy.GlobalModelRegistry().RegisterClient(a.ID, providerKey, models)
+					service.GlobalModelRegistry().RegisterClient(a.ID, providerKey, models)
 				}
 			}
 		},
 	}
 
-	svc, err := cliproxy.NewBuilder().
+	svc, err := service.NewBuilder().
 		WithConfig(cfg).
 		WithConfigPath("config.yaml").
 		WithCoreAuthManager(core).

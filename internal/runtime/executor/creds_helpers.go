@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nghyane/llm-mux/sdk/cliproxy/auth"
+	"github.com/nghyane/llm-mux/internal/provider"
 )
 
 type CredExtractorConfig struct {
@@ -16,7 +16,7 @@ type CredExtractorConfig struct {
 	TrimWhitespace      bool
 }
 
-func ExtractCreds(a *auth.Auth, cfg CredExtractorConfig) (token, url string) {
+func ExtractCreds(a *provider.Auth, cfg CredExtractorConfig) (token, url string) {
 	if a == nil {
 		return "", ""
 	}
@@ -63,7 +63,7 @@ func ExtractCreds(a *auth.Auth, cfg CredExtractorConfig) (token, url string) {
 	return token, url
 }
 
-func ExtractRefreshToken(auth *auth.Auth) (string, bool) {
+func ExtractRefreshToken(auth *provider.Auth) (string, bool) {
 	if auth == nil || auth.Metadata == nil {
 		return "", false
 	}
@@ -73,7 +73,7 @@ func ExtractRefreshToken(auth *auth.Auth) (string, bool) {
 	return "", false
 }
 
-func UpdateRefreshMetadata(auth *auth.Auth, updates map[string]any, providerType string) {
+func UpdateRefreshMetadata(auth *provider.Auth, updates map[string]any, providerType string) {
 	if auth.Metadata == nil {
 		auth.Metadata = make(map[string]any)
 	}

@@ -11,9 +11,7 @@ import (
 
 	clineauth "github.com/nghyane/llm-mux/internal/auth/cline"
 	"github.com/nghyane/llm-mux/internal/config"
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
+	"github.com/nghyane/llm-mux/internal/provider"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -29,11 +27,11 @@ func (e *ClineExecutor) Identifier() string {
 	return "cline"
 }
 
-func (e *ClineExecutor) PrepareRequest(_ *http.Request, _ *cliproxyauth.Auth) error {
+func (e *ClineExecutor) PrepareRequest(_ *http.Request, _ *provider.Auth) error {
 	return nil
 }
 
-func (e *ClineExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
+func (e *ClineExecutor) Execute(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (resp provider.Response, err error) {
 	token, baseURL := clineCredentials(auth)
 	if token == "" {
 		return resp, fmt.Errorf("cline access token not available")
@@ -87,20 +85,20 @@ func (e *ClineExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 
 	reporter.publish(ctx, extractUsageFromOpenAIResponse(data))
 
-	fromOpenAI := sdktranslator.FromString("openai")
+	fromOpenAI := provider.FromString("openai")
 	translatedResp, err := TranslateResponseNonStream(e.cfg, fromOpenAI, from, data, req.Model)
 	if err != nil {
 		return resp, err
 	}
 	if translatedResp != nil {
-		resp = cliproxyexecutor.Response{Payload: translatedResp}
+		resp = provider.Response{Payload: translatedResp}
 	} else {
-		resp = cliproxyexecutor.Response{Payload: data}
+		resp = provider.Response{Payload: data}
 	}
 	return resp, nil
 }
 
-func (e *ClineExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (stream <-chan cliproxyexecutor.StreamChunk, err error) {
+func (e *ClineExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (stream <-chan provider.StreamChunk, err error) {
 	token, baseURL := clineCredentials(auth)
 	if token == "" {
 		return nil, fmt.Errorf("cline access token not available")
@@ -181,7 +179,7 @@ func clinePreprocess(line []byte, firstChunk bool) []byte {
 	return append([]byte("data: "), payload...)
 }
 
-func clineCredentials(a *cliproxyauth.Auth) (token, baseURL string) {
+func clineCredentials(a *provider.Auth) (token, baseURL string) {
 	return ExtractCreds(a, ClineCredsConfig)
 }
 
@@ -231,11 +229,11 @@ func shouldSkipEmptyContentChunk(payload []byte) bool {
 	return true
 }
 
-func (e *ClineExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (e *ClineExecutor) CountTokens(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	return CountTokensForOpenAIProvider(ctx, e.cfg, "cline executor", opts.SourceFormat, req.Model, req.Payload, nil)
 }
 
-func (e *ClineExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+func (e *ClineExecutor) Refresh(ctx context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	if auth == nil {
 		return nil, fmt.Errorf("cline executor: auth is nil")
 	}

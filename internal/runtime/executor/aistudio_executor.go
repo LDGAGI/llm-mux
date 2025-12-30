@@ -10,14 +10,12 @@ import (
 	"strings"
 
 	"github.com/nghyane/llm-mux/internal/config"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
 	"github.com/nghyane/llm-mux/internal/wsrelay"
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -35,11 +33,11 @@ func NewAIStudioExecutor(cfg *config.Config, provider string, relay *wsrelay.Man
 
 func (e *AIStudioExecutor) Identifier() string { return "aistudio" }
 
-func (e *AIStudioExecutor) PrepareRequest(_ *http.Request, _ *cliproxyauth.Auth) error {
+func (e *AIStudioExecutor) PrepareRequest(_ *http.Request, _ *provider.Auth) error {
 	return nil
 }
 
-func (e *AIStudioExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
+func (e *AIStudioExecutor) Execute(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (resp provider.Response, err error) {
 	reporter := newUsageReporter(ctx, e.Identifier(), req.Model, auth)
 	defer reporter.trackFailure(ctx, &err)
 
@@ -69,20 +67,20 @@ func (e *AIStudioExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth,
 	}
 	reporter.publish(ctx, extractUsageFromGeminiResponse(wsResp.Body))
 
-	fromFormat := sdktranslator.FromString("gemini")
+	fromFormat := provider.FromString("gemini")
 	translatedResp, err := TranslateResponseNonStream(e.cfg, fromFormat, opts.SourceFormat, wsResp.Body, req.Model)
 	if err != nil {
 		return resp, err
 	}
 	if translatedResp != nil {
-		resp = cliproxyexecutor.Response{Payload: ensureColonSpacedJSON(translatedResp)}
+		resp = provider.Response{Payload: ensureColonSpacedJSON(translatedResp)}
 	} else {
-		resp = cliproxyexecutor.Response{Payload: ensureColonSpacedJSON(wsResp.Body)}
+		resp = provider.Response{Payload: ensureColonSpacedJSON(wsResp.Body)}
 	}
 	return resp, nil
 }
 
-func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (stream <-chan cliproxyexecutor.StreamChunk, err error) {
+func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (stream <-chan provider.StreamChunk, err error) {
 	reporter := newUsageReporter(ctx, e.Identifier(), req.Model, auth)
 	defer reporter.trackFailure(ctx, &err)
 
@@ -135,7 +133,7 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 		}
 		return nil, NewStatusError(firstEvent.Status, body.String(), nil)
 	}
-	out := make(chan cliproxyexecutor.StreamChunk, 32)
+	out := make(chan provider.StreamChunk, 32)
 	stream = out
 
 	go func(first wsrelay.StreamEvent, inputTokens int64) {
@@ -158,7 +156,7 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 			if event.Err != nil {
 				reporter.publishFailure(ctx)
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Err: fmt.Errorf("wsrelay: %v", event.Err)}:
+				case out <- provider.StreamChunk{Err: fmt.Errorf("wsrelay: %v", event.Err)}:
 				case <-ctx.Done():
 				}
 				return false
@@ -172,7 +170,7 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 					chunks, usage, err := processor.ProcessLine(bytes.Clone(filtered))
 					if err != nil {
 						select {
-						case out <- cliproxyexecutor.StreamChunk{Err: err}:
+						case out <- provider.StreamChunk{Err: err}:
 						case <-ctx.Done():
 						}
 						return false
@@ -182,7 +180,7 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 					}
 					for _, chunk := range chunks {
 						select {
-						case out <- cliproxyexecutor.StreamChunk{Payload: ensureColonSpacedJSON(chunk)}:
+						case out <- provider.StreamChunk{Payload: ensureColonSpacedJSON(chunk)}:
 						case <-ctx.Done():
 							return false
 						}
@@ -192,14 +190,14 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 			case wsrelay.MessageTypeStreamEnd:
 				if chunks, err := processor.ProcessDone(); err != nil {
 					select {
-					case out <- cliproxyexecutor.StreamChunk{Err: err}:
+					case out <- provider.StreamChunk{Err: err}:
 					case <-ctx.Done():
 					}
 					return false
 				} else {
 					for _, chunk := range chunks {
 						select {
-						case out <- cliproxyexecutor.StreamChunk{Payload: ensureColonSpacedJSON(chunk)}:
+						case out <- provider.StreamChunk{Payload: ensureColonSpacedJSON(chunk)}:
 						case <-ctx.Done():
 							return false
 						}
@@ -207,24 +205,24 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 				}
 				return false
 			case wsrelay.MessageTypeHTTPResp:
-				fromFormat := sdktranslator.FromString("gemini")
+				fromFormat := provider.FromString("gemini")
 				translatedResp, err := TranslateResponseNonStream(e.cfg, fromFormat, opts.SourceFormat, event.Payload, req.Model)
 				if err != nil {
 					select {
-					case out <- cliproxyexecutor.StreamChunk{Err: err}:
+					case out <- provider.StreamChunk{Err: err}:
 					case <-ctx.Done():
 					}
 					return false
 				}
 				if translatedResp != nil {
 					select {
-					case out <- cliproxyexecutor.StreamChunk{Payload: ensureColonSpacedJSON(translatedResp)}:
+					case out <- provider.StreamChunk{Payload: ensureColonSpacedJSON(translatedResp)}:
 					case <-ctx.Done():
 						return false
 					}
 				} else {
 					select {
-					case out <- cliproxyexecutor.StreamChunk{Payload: ensureColonSpacedJSON(event.Payload)}:
+					case out <- provider.StreamChunk{Payload: ensureColonSpacedJSON(event.Payload)}:
 					case <-ctx.Done():
 						return false
 					}
@@ -234,7 +232,7 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 			case wsrelay.MessageTypeError:
 				reporter.publishFailure(ctx)
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Err: fmt.Errorf("wsrelay: %v", event.Err)}:
+				case out <- provider.StreamChunk{Err: fmt.Errorf("wsrelay: %v", event.Err)}:
 				case <-ctx.Done():
 				}
 				return false
@@ -253,10 +251,10 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 	return stream, nil
 }
 
-func (e *AIStudioExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (e *AIStudioExecutor) CountTokens(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	_, body, err := e.translateRequest(req, opts, false)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 
 	body.payload, _ = sjson.DeleteBytes(body.payload, "generationConfig")
@@ -276,19 +274,19 @@ func (e *AIStudioExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.A
 	}
 	resp, err := e.relay.NonStream(ctx, authID, wsReq)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	if resp.Status < 200 || resp.Status >= 300 {
-		return cliproxyexecutor.Response{}, NewStatusError(resp.Status, string(resp.Body), nil)
+		return provider.Response{}, NewStatusError(resp.Status, string(resp.Body), nil)
 	}
 	totalTokens := gjson.GetBytes(resp.Body, "totalTokens").Int()
 	if totalTokens <= 0 {
-		return cliproxyexecutor.Response{}, fmt.Errorf("wsrelay: totalTokens missing in response")
+		return provider.Response{}, fmt.Errorf("wsrelay: totalTokens missing in response")
 	}
-	return cliproxyexecutor.Response{Payload: resp.Body}, nil
+	return provider.Response{Payload: resp.Body}, nil
 }
 
-func (e *AIStudioExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+func (e *AIStudioExecutor) Refresh(ctx context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	_ = ctx
 	return auth, nil
 }
@@ -296,7 +294,7 @@ func (e *AIStudioExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth)
 type translatedPayload struct {
 	payload  []byte
 	action   string
-	toFormat sdktranslator.Format
+	toFormat provider.Format
 }
 
 type aistudioStreamProcessor struct {
@@ -329,9 +327,9 @@ func (p *aistudioStreamProcessor) ProcessDone() ([][]byte, error) {
 	return p.translator.Flush(), nil
 }
 
-func (e *AIStudioExecutor) translateRequest(req cliproxyexecutor.Request, opts cliproxyexecutor.Options, stream bool) ([]byte, translatedPayload, error) {
+func (e *AIStudioExecutor) translateRequest(req provider.Request, opts provider.Options, stream bool) ([]byte, translatedPayload, error) {
 	from := opts.SourceFormat
-	formatGemini := sdktranslator.FromString("gemini")
+	formatGemini := provider.FromString("gemini")
 	payload, err := TranslateToGemini(e.cfg, from, req.Model, req.Payload, stream, req.Metadata)
 	if err != nil {
 		return nil, translatedPayload{}, fmt.Errorf("translate request: %w", err)
@@ -358,9 +356,9 @@ func (e *AIStudioExecutor) translateRequest(req cliproxyexecutor.Request, opts c
 	return payload, translatedPayload{payload: payload, action: action, toFormat: formatGemini}, nil
 }
 
-func (e *AIStudioExecutor) translateRequestWithTokens(req cliproxyexecutor.Request, opts cliproxyexecutor.Options, stream bool) (translatedPayload, int64, error) {
+func (e *AIStudioExecutor) translateRequestWithTokens(req provider.Request, opts provider.Options, stream bool) (translatedPayload, int64, error) {
 	from := opts.SourceFormat
-	formatGemini := sdktranslator.FromString("gemini")
+	formatGemini := provider.FromString("gemini")
 
 	translation, err := TranslateToGeminiWithTokens(e.cfg, from, req.Model, req.Payload, stream, req.Metadata)
 	if err != nil {
@@ -461,7 +459,7 @@ func ensureColonSpacedJSON(payload []byte) []byte {
 	return compacted
 }
 
-func FetchAIStudioModels(ctx context.Context, auth *cliproxyauth.Auth, relay *wsrelay.Manager) []*registry.ModelInfo {
+func FetchAIStudioModels(ctx context.Context, auth *provider.Auth, relay *wsrelay.Manager) []*registry.ModelInfo {
 	if relay == nil {
 		return nil
 	}

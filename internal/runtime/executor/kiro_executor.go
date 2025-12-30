@@ -17,13 +17,11 @@ import (
 	"github.com/nghyane/llm-mux/internal/auth/kiro"
 	"github.com/nghyane/llm-mux/internal/config"
 	"github.com/nghyane/llm-mux/internal/constant"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/translator/from_ir"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	coreauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdkconfig "github.com/nghyane/llm-mux/sdk/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -53,7 +51,7 @@ func NewKiroExecutor(cfg *config.Config) *KiroExecutor {
 
 func (e *KiroExecutor) Identifier() string { return constant.Kiro }
 
-func (e *KiroExecutor) ensureValidToken(ctx context.Context, auth *coreauth.Auth) (string, *coreauth.Auth, error) {
+func (e *KiroExecutor) ensureValidToken(ctx context.Context, auth *provider.Auth) (string, *provider.Auth, error) {
 	if auth == nil {
 		return "", nil, fmt.Errorf("kiro: auth is nil")
 	}
@@ -71,7 +69,7 @@ func (e *KiroExecutor) ensureValidToken(ctx context.Context, auth *coreauth.Auth
 	return getMetaString(updatedAuth.Metadata, "access_token", "accessToken"), updatedAuth, nil
 }
 
-func (e *KiroExecutor) Refresh(ctx context.Context, auth *coreauth.Auth) (*coreauth.Auth, error) {
+func (e *KiroExecutor) Refresh(ctx context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	var creds kiro.KiroCredentials
 	data, _ := json.Marshal(auth.Metadata)
 	if err := json.Unmarshal(data, &creds); err != nil {
@@ -96,8 +94,8 @@ func (e *KiroExecutor) Refresh(ctx context.Context, auth *coreauth.Auth) (*corea
 
 type requestContext struct {
 	ctx         context.Context
-	auth        *coreauth.Auth
-	req         cliproxyexecutor.Request
+	auth        *provider.Auth
+	req         provider.Request
 	token       string
 	kiroModelID string
 	requestID   string
@@ -105,7 +103,7 @@ type requestContext struct {
 	kiroBody    []byte
 }
 
-func (e *KiroExecutor) prepareRequest(ctx context.Context, auth *coreauth.Auth, req cliproxyexecutor.Request) (*requestContext, error) {
+func (e *KiroExecutor) prepareRequest(ctx context.Context, auth *provider.Auth, req provider.Request) (*requestContext, error) {
 	rc := &requestContext{ctx: ctx, auth: auth, req: req, requestID: uuid.New().String()[:8]}
 	var err error
 	rc.token, rc.auth, err = e.ensureValidToken(ctx, auth)
@@ -149,32 +147,32 @@ func (e *KiroExecutor) buildHTTPRequest(rc *requestContext) (*http.Request, erro
 	return httpReq, nil
 }
 
-func (e *KiroExecutor) Execute(ctx context.Context, auth *coreauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (e *KiroExecutor) Execute(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	rc, err := e.prepareRequest(ctx, auth, req)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	httpReq, err := e.buildHTTPRequest(rc)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 
 	client := &http.Client{Timeout: KiroRequestTimeout}
 	if proxy := e.cfg.ProxyURL; proxy != "" {
-		util.SetProxy(&sdkconfig.SDKConfig{ProxyURL: proxy}, client)
+		util.SetProxy(&config.SDKConfig{ProxyURL: proxy}, client)
 	} else if auth.ProxyURL != "" {
-		util.SetProxy(&sdkconfig.SDKConfig{ProxyURL: auth.ProxyURL}, client)
+		util.SetProxy(&config.SDKConfig{ProxyURL: auth.ProxyURL}, client)
 	}
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return cliproxyexecutor.Response{}, fmt.Errorf("upstream error %d: %s", resp.StatusCode, string(body))
+		return provider.Response{}, fmt.Errorf("upstream error %d: %s", resp.StatusCode, string(body))
 	}
 
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/vnd.amazon.eventstream") {
@@ -183,7 +181,7 @@ func (e *KiroExecutor) Execute(ctx context.Context, auth *coreauth.Auth, req cli
 	return e.handleJSONResponse(resp.Body, req.Model)
 }
 
-func (e *KiroExecutor) handleEventStreamResponse(body io.ReadCloser, model string) (cliproxyexecutor.Response, error) {
+func (e *KiroExecutor) handleEventStreamResponse(body io.ReadCloser, model string) (provider.Response, error) {
 	buf := scannerBufferPool.Get().([]byte)
 	defer scannerBufferPool.Put(buf)
 
@@ -206,30 +204,30 @@ func (e *KiroExecutor) handleEventStreamResponse(body io.ReadCloser, model strin
 
 	converted, err := from_ir.ToOpenAIChatCompletion([]ir.Message{*msg}, nil, model, "chatcmpl-"+uuid.New().String())
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
-	return cliproxyexecutor.Response{Payload: converted}, nil
+	return provider.Response{Payload: converted}, nil
 }
 
-func (e *KiroExecutor) handleJSONResponse(body io.ReadCloser, model string) (cliproxyexecutor.Response, error) {
+func (e *KiroExecutor) handleJSONResponse(body io.ReadCloser, model string) (provider.Response, error) {
 	rawData, err := io.ReadAll(body)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 
 	messages, usage, err := to_ir.ParseKiroResponse(rawData)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 
 	converted, err := from_ir.ToOpenAIChatCompletion(messages, usage, model, "chatcmpl-"+uuid.New().String())
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
-	return cliproxyexecutor.Response{Payload: converted}, nil
+	return provider.Response{Payload: converted}, nil
 }
 
-func (e *KiroExecutor) ExecuteStream(ctx context.Context, auth *coreauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (<-chan cliproxyexecutor.StreamChunk, error) {
+func (e *KiroExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (<-chan provider.StreamChunk, error) {
 	rc, err := e.prepareRequest(ctx, auth, req)
 	if err != nil {
 		return nil, err
@@ -242,9 +240,9 @@ func (e *KiroExecutor) ExecuteStream(ctx context.Context, auth *coreauth.Auth, r
 
 	client := &http.Client{}
 	if proxy := e.cfg.ProxyURL; proxy != "" {
-		util.SetProxy(&sdkconfig.SDKConfig{ProxyURL: proxy}, client)
+		util.SetProxy(&config.SDKConfig{ProxyURL: proxy}, client)
 	} else if auth.ProxyURL != "" {
-		util.SetProxy(&sdkconfig.SDKConfig{ProxyURL: auth.ProxyURL}, client)
+		util.SetProxy(&config.SDKConfig{ProxyURL: auth.ProxyURL}, client)
 	}
 
 	resp, err := client.Do(httpReq)
@@ -257,12 +255,12 @@ func (e *KiroExecutor) ExecuteStream(ctx context.Context, auth *coreauth.Auth, r
 		return nil, fmt.Errorf("upstream error %d: %s", resp.StatusCode, string(body))
 	}
 
-	out := make(chan cliproxyexecutor.StreamChunk, 32)
+	out := make(chan provider.StreamChunk, 32)
 	go e.processStream(ctx, resp, req.Model, out)
 	return out, nil
 }
 
-func (e *KiroExecutor) processStream(ctx context.Context, resp *http.Response, model string, out chan<- cliproxyexecutor.StreamChunk) {
+func (e *KiroExecutor) processStream(ctx context.Context, resp *http.Response, model string, out chan<- provider.StreamChunk) {
 	defer resp.Body.Close()
 	defer close(out)
 	defer func() {
@@ -296,7 +294,7 @@ func (e *KiroExecutor) processStream(ctx context.Context, resp *http.Response, m
 		for _, ev := range events {
 			if chunk, _ := from_ir.ToOpenAIChunk(ev, model, messageID, idx); len(chunk) > 0 {
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+				case out <- provider.StreamChunk{Payload: chunk}:
 					idx++
 				case <-ctx.Done():
 					return
@@ -308,14 +306,14 @@ func (e *KiroExecutor) processStream(ctx context.Context, resp *http.Response, m
 	finish := ir.UnifiedEvent{Type: ir.EventTypeFinish, FinishReason: state.DetermineFinishReason()}
 	if chunk, _ := from_ir.ToOpenAIChunk(finish, model, messageID, idx); len(chunk) > 0 {
 		select {
-		case out <- cliproxyexecutor.StreamChunk{Payload: chunk}:
+		case out <- provider.StreamChunk{Payload: chunk}:
 		case <-ctx.Done():
 		}
 	}
 }
 
-func (e *KiroExecutor) CountTokens(ctx context.Context, auth *coreauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
-	return cliproxyexecutor.Response{Payload: []byte(`{"total_tokens": 0}`)}, nil
+func (e *KiroExecutor) CountTokens(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
+	return provider.Response{Payload: []byte(`{"total_tokens": 0}`)}, nil
 }
 
 func getMetaString(meta map[string]any, keys ...string) string {

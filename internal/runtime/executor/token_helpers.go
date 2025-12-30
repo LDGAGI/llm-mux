@@ -6,8 +6,7 @@ import (
 	"strings"
 
 	"github.com/nghyane/llm-mux/internal/config"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/tidwall/gjson"
 	"github.com/tiktoken-go/tokenizer"
 )
@@ -240,14 +239,14 @@ func CountTokensForOpenAIProvider(
 	ctx context.Context,
 	cfg *config.Config,
 	executorName string,
-	from sdktranslator.Format,
+	from provider.Format,
 	model string,
 	payload []byte,
 	metadata map[string]any,
-) (cliproxyexecutor.Response, error) {
+) (provider.Response, error) {
 	body, err := TranslateToOpenAI(cfg, from, model, payload, false, metadata)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 
 	modelName := gjson.GetBytes(body, "model").String()
@@ -257,14 +256,14 @@ func CountTokensForOpenAIProvider(
 
 	enc, err := tokenizerForModel(modelName)
 	if err != nil {
-		return cliproxyexecutor.Response{}, fmt.Errorf("%s: tokenizer init failed: %w", executorName, err)
+		return provider.Response{}, fmt.Errorf("%s: tokenizer init failed: %w", executorName, err)
 	}
 
 	count, err := countOpenAIChatTokens(enc, body)
 	if err != nil {
-		return cliproxyexecutor.Response{}, fmt.Errorf("%s: token counting failed: %w", executorName, err)
+		return provider.Response{}, fmt.Errorf("%s: token counting failed: %w", executorName, err)
 	}
 
 	usageJSON := buildOpenAIUsageJSON(count)
-	return cliproxyexecutor.Response{Payload: usageJSON}, nil
+	return provider.Response{Payload: usageJSON}, nil
 }

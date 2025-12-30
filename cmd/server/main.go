@@ -20,16 +20,16 @@ import (
 
 	"github.com/joho/godotenv"
 	configaccess "github.com/nghyane/llm-mux/internal/access/config_access"
+	authlogin "github.com/nghyane/llm-mux/internal/auth/login"
 	"github.com/nghyane/llm-mux/internal/buildinfo"
 	"github.com/nghyane/llm-mux/internal/cmd"
 	"github.com/nghyane/llm-mux/internal/config"
 	"github.com/nghyane/llm-mux/internal/embedded"
 	"github.com/nghyane/llm-mux/internal/logging"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/store"
 	"github.com/nghyane/llm-mux/internal/usage"
 	"github.com/nghyane/llm-mux/internal/util"
-	sdkAuth "github.com/nghyane/llm-mux/sdk/auth"
-	coreauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 	flag "github.com/spf13/pflag"
 )
@@ -381,7 +381,7 @@ func main() {
 		}
 	}
 
-	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
+	provider.SetQuotaCooldownDisabled(cfg.DisableCooling)
 
 	if err = logging.ConfigureLogOutput(cfg.LoggingToFile); err != nil {
 		log.Fatalf("failed to configure log output: %v", err)
@@ -405,13 +405,13 @@ func main() {
 
 	// Register the shared token store once so all components use the same persistence backend.
 	if usePostgresStore {
-		sdkAuth.RegisterTokenStore(pgStoreInst)
+		authlogin.RegisterTokenStore(pgStoreInst)
 	} else if useObjectStore {
-		sdkAuth.RegisterTokenStore(objectStoreInst)
+		authlogin.RegisterTokenStore(objectStoreInst)
 	} else if useGitStore {
-		sdkAuth.RegisterTokenStore(gitStoreInst)
+		authlogin.RegisterTokenStore(gitStoreInst)
 	} else {
-		sdkAuth.RegisterTokenStore(sdkAuth.NewFileTokenStore())
+		authlogin.RegisterTokenStore(authlogin.NewFileTokenStore())
 	}
 
 	// Register built-in access providers before constructing services.

@@ -9,11 +9,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/nghyane/llm-mux/internal/auth/login"
 	"github.com/nghyane/llm-mux/internal/auth/vertex"
 	"github.com/nghyane/llm-mux/internal/config"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/util"
-	sdkAuth "github.com/nghyane/llm-mux/sdk/auth"
-	coreauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -78,7 +78,7 @@ func DoVertexImport(cfg *config.Config, keyPath string) {
 		"type":            "vertex",
 		"label":           labelForVertex(projectID, email),
 	}
-	record := &coreauth.Auth{
+	record := &provider.Auth{
 		ID:       fileName,
 		Provider: "vertex",
 		FileName: fileName,
@@ -86,7 +86,7 @@ func DoVertexImport(cfg *config.Config, keyPath string) {
 		Metadata: metadata,
 	}
 
-	store := sdkAuth.GetTokenStore()
+	store := login.GetTokenStore()
 	if setter, ok := store.(interface{ SetBaseDir(string) }); ok {
 		setter.SetBaseDir(cfg.AuthDir)
 	}

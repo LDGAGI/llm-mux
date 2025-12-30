@@ -9,11 +9,10 @@ import (
 	"sync"
 
 	"github.com/nghyane/llm-mux/internal/config"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/translator/from_ir"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )
@@ -90,7 +89,7 @@ func DataTagPreprocessor() StreamPreprocessor {
 	}
 }
 
-func sendChunk(ctx context.Context, out chan<- cliproxyexecutor.StreamChunk, chunk cliproxyexecutor.StreamChunk) bool {
+func sendChunk(ctx context.Context, out chan<- provider.StreamChunk, chunk provider.StreamChunk) bool {
 	select {
 	case out <- chunk:
 		return true
@@ -117,8 +116,8 @@ func RunSSEStream(
 	reporter *usageReporter,
 	processor StreamProcessor,
 	cfg StreamConfig,
-) <-chan cliproxyexecutor.StreamChunk {
-	out := make(chan cliproxyexecutor.StreamChunk, 32)
+) <-chan provider.StreamChunk {
+	out := make(chan provider.StreamChunk, 32)
 
 	go func() {
 		defer close(out)
@@ -162,11 +161,11 @@ func RunSSEStream(
 						if reporter != nil {
 							reporter.publishFailure(ctx)
 						}
-						sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Err: doneErr})
+						sendChunk(ctx, out, provider.StreamChunk{Err: doneErr})
 						return
 					}
 					for _, chunk := range doneChunks {
-						if !sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: chunk}) {
+						if !sendChunk(ctx, out, provider.StreamChunk{Payload: chunk}) {
 							return
 						}
 					}
@@ -195,14 +194,14 @@ func RunSSEStream(
 				if processor != nil {
 					if flushed, _ := processor.ProcessDone(); len(flushed) > 0 {
 						for _, chunk := range flushed {
-							if !sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: chunk}) {
+							if !sendChunk(ctx, out, provider.StreamChunk{Payload: chunk}) {
 								return
 							}
 						}
 					}
 				}
 				errorJSON := fmt.Sprintf(`data: {"error": {"message": "%s", "type": "server_error"}}`+"\n\n", err.Error())
-				sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: []byte(errorJSON)})
+				sendChunk(ctx, out, provider.StreamChunk{Payload: []byte(errorJSON)})
 				return
 			}
 
@@ -212,12 +211,12 @@ func RunSSEStream(
 
 			if len(chunks) > 0 {
 				for _, chunk := range chunks {
-					if !sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: chunk}) {
+					if !sendChunk(ctx, out, provider.StreamChunk{Payload: chunk}) {
 						return
 					}
 				}
 			} else if cfg.PassthroughOnEmpty {
-				if !sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: bytes.Clone(payload)}) {
+				if !sendChunk(ctx, out, provider.StreamChunk{Payload: bytes.Clone(payload)}) {
 					return
 				}
 			}
@@ -229,11 +228,11 @@ func RunSSEStream(
 				if reporter != nil {
 					reporter.publishFailure(ctx)
 				}
-				sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Err: doneErr})
+				sendChunk(ctx, out, provider.StreamChunk{Err: doneErr})
 				return
 			}
 			for _, chunk := range doneChunks {
-				if !sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: chunk}) {
+				if !sendChunk(ctx, out, provider.StreamChunk{Payload: chunk}) {
 					return
 				}
 			}
@@ -244,7 +243,7 @@ func RunSSEStream(
 				reporter.publishFailure(ctx)
 			}
 			errorJSON := fmt.Sprintf(`data: {"error": {"message": "%s", "type": "server_error"}}`+"\n\n", errScan.Error())
-			sendChunk(ctx, out, cliproxyexecutor.StreamChunk{Payload: []byte(errorJSON)})
+			sendChunk(ctx, out, provider.StreamChunk{Payload: []byte(errorJSON)})
 			return
 		}
 
@@ -282,10 +281,10 @@ type OpenAIStreamProcessor struct {
 	firstChunk bool
 }
 
-func NewOpenAIStreamProcessor(cfg *config.Config, from sdktranslator.Format, model, messageID string) *OpenAIStreamProcessor {
+func NewOpenAIStreamProcessor(cfg *config.Config, from provider.Format, model, messageID string) *OpenAIStreamProcessor {
 	ctx := NewStreamContext()
 	return &OpenAIStreamProcessor{
-		translator: NewStreamTranslator(cfg, sdktranslator.FromString("openai"), from.String(), model, messageID, ctx),
+		translator: NewStreamTranslator(cfg, provider.FromString("openai"), from.String(), model, messageID, ctx),
 		ctx:        ctx,
 		firstChunk: true,
 	}

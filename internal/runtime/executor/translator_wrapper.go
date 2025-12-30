@@ -6,21 +6,21 @@ import (
 	"strings"
 
 	"github.com/nghyane/llm-mux/internal/config"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/translator/from_ir"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
 var (
-	formatOpenAI = sdktranslator.FromString("openai")
-	formatGemini = sdktranslator.FromString("gemini")
-	formatCodex  = sdktranslator.FromString("codex")
-	formatClaude = sdktranslator.FromString("claude")
+	formatOpenAI = provider.FromString("openai")
+	formatGemini = provider.FromString("gemini")
+	formatCodex  = provider.FromString("codex")
+	formatClaude = provider.FromString("claude")
 )
 
 func extractUsageFromEvents(events []ir.UnifiedEvent) *ir.Usage {
@@ -43,7 +43,7 @@ type StreamTranslationResult struct {
 	Usage  *ir.Usage // Usage extracted from IR events (nil if not present in this chunk)
 }
 
-func TranslateToGeminiWithTokens(cfg *config.Config, from sdktranslator.Format, model string, payload []byte, streaming bool, metadata map[string]any) (*TranslationResult, error) {
+func TranslateToGeminiWithTokens(cfg *config.Config, from provider.Format, model string, payload []byte, streaming bool, metadata map[string]any) (*TranslationResult, error) {
 	irReq, err := convertRequestToIR(from, model, payload, metadata)
 	if err != nil {
 		return nil, err
@@ -66,7 +66,7 @@ func TranslateToGeminiWithTokens(cfg *config.Config, from sdktranslator.Format, 
 	return result, nil
 }
 
-func TranslateToGeminiCLIWithTokens(cfg *config.Config, from sdktranslator.Format, model string, payload []byte, streaming bool, metadata map[string]any) (*TranslationResult, error) {
+func TranslateToGeminiCLIWithTokens(cfg *config.Config, from provider.Format, model string, payload []byte, streaming bool, metadata map[string]any) (*TranslationResult, error) {
 	fromStr := from.String()
 	isClaudeModel := strings.Contains(model, "claude")
 
@@ -171,7 +171,7 @@ func cleanUndefinedRecursive(v any) any {
 	}
 }
 
-func convertRequestToIR(from sdktranslator.Format, model string, payload []byte, metadata map[string]any) (*ir.UnifiedChatRequest, error) {
+func convertRequestToIR(from provider.Format, model string, payload []byte, metadata map[string]any) (*ir.UnifiedChatRequest, error) {
 	payload = sanitizeUndefinedValues(payload)
 
 	var irReq *ir.UnifiedChatRequest
@@ -273,7 +273,7 @@ func normalizeIRLimits(model string, req *ir.UnifiedChatRequest) {
 	}
 }
 
-func TranslateToGeminiCLI(cfg *config.Config, from sdktranslator.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
+func TranslateToGeminiCLI(cfg *config.Config, from provider.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
 	result, err := TranslateToGeminiCLIWithTokens(cfg, from, model, payload, streaming, metadata)
 	if err != nil {
 		return nil, err
@@ -357,7 +357,7 @@ func matchesPattern(pattern, name string) bool {
 	return false
 }
 
-func TranslateToCodex(cfg *config.Config, from sdktranslator.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
+func TranslateToCodex(cfg *config.Config, from provider.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
 	irReq, err := convertRequestToIR(from, model, payload, metadata)
 	if err != nil {
 		return nil, err
@@ -365,7 +365,7 @@ func TranslateToCodex(cfg *config.Config, from sdktranslator.Format, model strin
 	return from_ir.ToOpenAIRequestFmt(irReq, from_ir.FormatResponsesAPI)
 }
 
-func TranslateToClaude(cfg *config.Config, from sdktranslator.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
+func TranslateToClaude(cfg *config.Config, from provider.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
 	irReq, err := convertRequestToIR(from, model, payload, metadata)
 	if err != nil {
 		return nil, err
@@ -373,7 +373,7 @@ func TranslateToClaude(cfg *config.Config, from sdktranslator.Format, model stri
 	return (&from_ir.ClaudeProvider{}).ConvertRequest(irReq)
 }
 
-func TranslateToOpenAI(cfg *config.Config, from sdktranslator.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
+func TranslateToOpenAI(cfg *config.Config, from provider.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
 	fromStr := from.String()
 	if fromStr == "openai" || fromStr == "cline" {
 		return applyPayloadConfigToIR(cfg, model, payload), nil
@@ -390,7 +390,7 @@ func TranslateToOpenAI(cfg *config.Config, from sdktranslator.Format, model stri
 	return applyPayloadConfigToIR(cfg, model, openaiJSON), nil
 }
 
-func TranslateToGemini(cfg *config.Config, from sdktranslator.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
+func TranslateToGemini(cfg *config.Config, from provider.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {
 	result, err := TranslateToGeminiWithTokens(cfg, from, model, payload, streaming, metadata)
 	if err != nil {
 		return nil, err

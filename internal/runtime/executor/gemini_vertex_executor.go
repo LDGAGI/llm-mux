@@ -12,13 +12,11 @@ import (
 
 	vertexauth "github.com/nghyane/llm-mux/internal/auth/vertex"
 	"github.com/nghyane/llm-mux/internal/config"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	cliproxyauth "github.com/nghyane/llm-mux/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/nghyane/llm-mux/sdk/cliproxy/executor"
-	sdktranslator "github.com/nghyane/llm-mux/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/sjson"
 	"golang.org/x/oauth2"
@@ -30,8 +28,8 @@ const (
 )
 
 type VertexAuthStrategy interface {
-	GetToken(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth) (string, error)
-	BuildURL(model, action string, opts cliproxyexecutor.Options) string
+	GetToken(ctx context.Context, cfg *config.Config, auth *provider.Auth) (string, error)
+	BuildURL(model, action string, opts provider.Options) string
 	ApplyAuth(req *http.Request, token string)
 }
 
@@ -41,11 +39,11 @@ type serviceAccountStrategy struct {
 	saJSON    []byte
 }
 
-func (s *serviceAccountStrategy) GetToken(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth) (string, error) {
+func (s *serviceAccountStrategy) GetToken(ctx context.Context, cfg *config.Config, auth *provider.Auth) (string, error) {
 	return vertexAccessToken(ctx, cfg, auth, s.saJSON)
 }
 
-func (s *serviceAccountStrategy) BuildURL(model, action string, opts cliproxyexecutor.Options) string {
+func (s *serviceAccountStrategy) BuildURL(model, action string, opts provider.Options) string {
 	baseURL := vertexBaseURL(s.location)
 	ub := GetURLBuilder()
 	defer ub.Release()
@@ -75,11 +73,11 @@ type apiKeyStrategy struct {
 	baseURL string
 }
 
-func (s *apiKeyStrategy) GetToken(_ context.Context, _ *config.Config, _ *cliproxyauth.Auth) (string, error) {
+func (s *apiKeyStrategy) GetToken(_ context.Context, _ *config.Config, _ *provider.Auth) (string, error) {
 	return s.apiKey, nil
 }
 
-func (s *apiKeyStrategy) BuildURL(model, action string, _ cliproxyexecutor.Options) string {
+func (s *apiKeyStrategy) BuildURL(model, action string, _ provider.Options) string {
 	baseURL := s.baseURL
 	if baseURL == "" {
 		baseURL = "https://generativelanguage.googleapis.com"
@@ -113,11 +111,11 @@ func NewGeminiVertexExecutor(cfg *config.Config) *GeminiVertexExecutor {
 
 func (e *GeminiVertexExecutor) Identifier() string { return "vertex" }
 
-func (e *GeminiVertexExecutor) PrepareRequest(_ *http.Request, _ *cliproxyauth.Auth) error {
+func (e *GeminiVertexExecutor) PrepareRequest(_ *http.Request, _ *provider.Auth) error {
 	return nil
 }
 
-func (e *GeminiVertexExecutor) resolveStrategy(auth *cliproxyauth.Auth) (VertexAuthStrategy, error) {
+func (e *GeminiVertexExecutor) resolveStrategy(auth *provider.Auth) (VertexAuthStrategy, error) {
 	apiKey, baseURL := vertexAPICreds(auth)
 	if apiKey != "" {
 		return &apiKeyStrategy{apiKey: apiKey, baseURL: baseURL}, nil
@@ -130,15 +128,15 @@ func (e *GeminiVertexExecutor) resolveStrategy(auth *cliproxyauth.Auth) (VertexA
 	return &serviceAccountStrategy{projectID: projectID, location: location, saJSON: saJSON}, nil
 }
 
-func (e *GeminiVertexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (e *GeminiVertexExecutor) Execute(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	strategy, err := e.resolveStrategy(auth)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	return e.executeWithStrategy(ctx, auth, req, opts, strategy)
 }
 
-func (e *GeminiVertexExecutor) executeWithStrategy(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, strategy VertexAuthStrategy) (resp cliproxyexecutor.Response, err error) {
+func (e *GeminiVertexExecutor) executeWithStrategy(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options, strategy VertexAuthStrategy) (resp provider.Response, err error) {
 	reporter := newUsageReporter(ctx, e.Identifier(), req.Model, auth)
 	defer reporter.trackFailure(ctx, &err)
 
@@ -201,20 +199,20 @@ func (e *GeminiVertexExecutor) executeWithStrategy(ctx context.Context, auth *cl
 	}
 	reporter.publish(ctx, extractUsageFromGeminiResponse(data))
 
-	fromFormat := sdktranslator.FromString("gemini")
+	fromFormat := provider.FromString("gemini")
 	translatedResp, err := TranslateResponseNonStream(e.cfg, fromFormat, from, data, req.Model)
 	if err != nil {
 		return resp, err
 	}
 	if translatedResp != nil {
-		resp = cliproxyexecutor.Response{Payload: translatedResp}
+		resp = provider.Response{Payload: translatedResp}
 	} else {
-		resp = cliproxyexecutor.Response{Payload: data}
+		resp = provider.Response{Payload: data}
 	}
 	return resp, nil
 }
 
-func (e *GeminiVertexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (<-chan cliproxyexecutor.StreamChunk, error) {
+func (e *GeminiVertexExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (<-chan provider.StreamChunk, error) {
 	strategy, err := e.resolveStrategy(auth)
 	if err != nil {
 		return nil, err
@@ -222,7 +220,7 @@ func (e *GeminiVertexExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 	return e.executeStreamWithStrategy(ctx, auth, req, opts, strategy)
 }
 
-func (e *GeminiVertexExecutor) executeStreamWithStrategy(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, strategy VertexAuthStrategy) (stream <-chan cliproxyexecutor.StreamChunk, err error) {
+func (e *GeminiVertexExecutor) executeStreamWithStrategy(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options, strategy VertexAuthStrategy) (stream <-chan provider.StreamChunk, err error) {
 	reporter := newUsageReporter(ctx, e.Identifier(), req.Model, auth)
 	defer reporter.trackFailure(ctx, &err)
 
@@ -283,19 +281,19 @@ func (e *GeminiVertexExecutor) executeStreamWithStrategy(ctx context.Context, au
 	}), nil
 }
 
-func (e *GeminiVertexExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+func (e *GeminiVertexExecutor) CountTokens(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (provider.Response, error) {
 	strategy, err := e.resolveStrategy(auth)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	return e.countTokensWithStrategy(ctx, auth, req, opts, strategy)
 }
 
-func (e *GeminiVertexExecutor) countTokensWithStrategy(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, strategy VertexAuthStrategy) (cliproxyexecutor.Response, error) {
+func (e *GeminiVertexExecutor) countTokensWithStrategy(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options, strategy VertexAuthStrategy) (provider.Response, error) {
 	from := opts.SourceFormat
 	translatedReq, err := TranslateToGemini(e.cfg, from, req.Model, req.Payload, false, req.Metadata)
 	if err != nil {
-		return cliproxyexecutor.Response{}, err
+		return provider.Response{}, err
 	}
 	translatedReq = util.StripThinkingConfigIfUnsupported(req.Model, translatedReq)
 	respCtx := context.WithValue(ctx, altContextKey{}, opts.Alt)
@@ -307,14 +305,14 @@ func (e *GeminiVertexExecutor) countTokensWithStrategy(ctx context.Context, auth
 
 	httpReq, errNewReq := http.NewRequestWithContext(respCtx, http.MethodPost, url, bytes.NewReader(translatedReq))
 	if errNewReq != nil {
-		return cliproxyexecutor.Response{}, errNewReq
+		return provider.Response{}, errNewReq
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	token, errTok := strategy.GetToken(ctx, e.cfg, auth)
 	if errTok != nil {
 		log.Errorf("vertex executor: access token error: %v", errTok)
-		return cliproxyexecutor.Response{}, NewStatusError(500, "internal server error", nil)
+		return provider.Response{}, NewStatusError(500, "internal server error", nil)
 	}
 	strategy.ApplyAuth(httpReq, token)
 	applyGeminiHeaders(httpReq, auth)
@@ -323,9 +321,9 @@ func (e *GeminiVertexExecutor) countTokensWithStrategy(ctx context.Context, auth
 	httpResp, errDo := httpClient.Do(httpReq)
 	if errDo != nil {
 		if errors.Is(errDo, context.DeadlineExceeded) {
-			return cliproxyexecutor.Response{}, NewTimeoutError("request timed out")
+			return provider.Response{}, NewTimeoutError("request timed out")
 		}
-		return cliproxyexecutor.Response{}, errDo
+		return provider.Response{}, errDo
 	}
 	defer func() {
 		if errClose := httpResp.Body.Close(); errClose != nil {
@@ -334,16 +332,16 @@ func (e *GeminiVertexExecutor) countTokensWithStrategy(ctx context.Context, auth
 	}()
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		result := HandleHTTPError(httpResp, "gemini-vertex executor")
-		return cliproxyexecutor.Response{}, result.Error
+		return provider.Response{}, result.Error
 	}
 	data, errRead := io.ReadAll(httpResp.Body)
 	if errRead != nil {
-		return cliproxyexecutor.Response{}, errRead
+		return provider.Response{}, errRead
 	}
-	return cliproxyexecutor.Response{Payload: data}, nil
+	return provider.Response{Payload: data}, nil
 }
 
-func (e *GeminiVertexExecutor) Refresh(_ context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+func (e *GeminiVertexExecutor) Refresh(_ context.Context, auth *provider.Auth) (*provider.Auth, error) {
 	return auth, nil
 }
 
@@ -377,7 +375,7 @@ func (p *vertexStreamProcessor) ProcessDone() ([][]byte, error) {
 	return p.translator.Flush(), nil
 }
 
-func vertexCreds(a *cliproxyauth.Auth) (projectID, location string, serviceAccountJSON []byte, err error) {
+func vertexCreds(a *provider.Auth) (projectID, location string, serviceAccountJSON []byte, err error) {
 	if a == nil || a.Metadata == nil {
 		return "", "", nil, fmt.Errorf("vertex executor: missing auth metadata")
 	}
@@ -415,7 +413,7 @@ func vertexCreds(a *cliproxyauth.Auth) (projectID, location string, serviceAccou
 	return projectID, location, saJSON, nil
 }
 
-func vertexAPICreds(a *cliproxyauth.Auth) (apiKey, baseURL string) {
+func vertexAPICreds(a *provider.Auth) (apiKey, baseURL string) {
 	if a == nil {
 		return "", ""
 	}
@@ -445,7 +443,7 @@ func vertexBaseURL(location string) string {
 	return ub.String()
 }
 
-func vertexAccessToken(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, saJSON []byte) (string, error) {
+func vertexAccessToken(ctx context.Context, cfg *config.Config, auth *provider.Auth, saJSON []byte) (string, error) {
 	if httpClient := newProxyAwareHTTPClient(ctx, cfg, auth, 0); httpClient != nil {
 		ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 	}
@@ -460,7 +458,7 @@ func vertexAccessToken(ctx context.Context, cfg *config.Config, auth *cliproxyau
 	return tok.AccessToken, nil
 }
 
-func FetchVertexModels(ctx context.Context, auth *cliproxyauth.Auth, cfg *config.Config) []*registry.ModelInfo {
+func FetchVertexModels(ctx context.Context, auth *provider.Auth, cfg *config.Config) []*registry.ModelInfo {
 	exec := &GeminiVertexExecutor{cfg: cfg}
 	strategy, err := exec.resolveStrategy(auth)
 	if err != nil {
