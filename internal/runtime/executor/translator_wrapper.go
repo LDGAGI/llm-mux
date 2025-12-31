@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"github.com/nghyane/llm-mux/internal/json"
 	"strings"
 
 	"github.com/nghyane/llm-mux/internal/config"
@@ -10,9 +9,9 @@ import (
 	"github.com/nghyane/llm-mux/internal/translator"
 	"github.com/nghyane/llm-mux/internal/translator/from_ir"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
+	"github.com/nghyane/llm-mux/internal/translator/preprocess"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -87,36 +86,13 @@ func TranslateToGeminiCLIWithTokens(cfg *config.Config, from provider.Format, mo
 		irReq.Messages = to_ir.MergeConsecutiveModelThinking(irReq.Messages)
 	}
 
-	if isClaudeModel {
-		if strings.HasSuffix(model, "-thinking") {
-			if irReq.Thinking == nil {
-				budget := int32(1024)
-				irReq.Thinking = &ir.ThinkingConfig{
-					ThinkingBudget:  &budget,
-					IncludeThoughts: true,
-				}
-			}
-		} else if irReq.Thinking != nil {
-			if thinkingModel := model + "-thinking"; registry.GetGlobalRegistry().GetModelInfo(thinkingModel) != nil {
-				irReq.Model = thinkingModel
-			}
-		}
-
-		if irReq.MaxTokens == nil || *irReq.MaxTokens == 0 {
-			defaultMax := ir.ClaudeDefaultMaxTokens
-			irReq.MaxTokens = &defaultMax
-		}
-
-		ir.CleanToolsForAntigravityClaude(irReq)
-	}
-
-	geminiJSON, err := translator.ConvertRequest("gemini-cli", irReq)
+	convertedJSON, err := translator.ConvertRequest("vertex-envelope", irReq)
 	if err != nil {
 		return nil, err
 	}
 
 	result := &TranslationResult{
-		Payload: applyPayloadConfigToIR(cfg, model, geminiJSON),
+		Payload: applyPayloadConfigToIR(cfg, model, convertedJSON),
 		IR:      irReq,
 	}
 
@@ -125,57 +101,6 @@ func TranslateToGeminiCLIWithTokens(cfg *config.Config, from provider.Format, mo
 	}
 
 	return result, nil
-}
-
-func sanitizeUndefinedValues(payload []byte) []byte {
-	if !strings.Contains(string(payload), "[undefined]") {
-		return payload
-	}
-	result := gjson.ParseBytes(payload)
-	if !result.IsObject() && !result.IsArray() {
-		return payload
-	}
-	cleaned := cleanUndefinedRecursive(result.Value())
-	if cleaned == nil {
-		return payload
-	}
-	out, err := json.Marshal(cleaned)
-	if err != nil {
-		return payload
-	}
-	return out
-}
-
-func cleanUndefinedRecursive(v any) any {
-	switch val := v.(type) {
-	case map[string]any:
-		cleaned := make(map[string]any)
-		for k, child := range val {
-			if str, ok := child.(string); ok && str == "[undefined]" {
-				continue
-			}
-			if cleanedChild := cleanUndefinedRecursive(child); cleanedChild != nil {
-				cleaned[k] = cleanedChild
-			}
-		}
-		if len(cleaned) == 0 {
-			return nil
-		}
-		return cleaned
-	case []any:
-		var cleaned []any
-		for _, item := range val {
-			if str, ok := item.(string); ok && str == "[undefined]" {
-				continue
-			}
-			if cleanedItem := cleanUndefinedRecursive(item); cleanedItem != nil {
-				cleaned = append(cleaned, cleanedItem)
-			}
-		}
-		return cleaned
-	default:
-		return v
-	}
 }
 
 func convertRequestToIR(from provider.Format, model string, payload []byte, metadata map[string]any) (*ir.UnifiedChatRequest, error) {
@@ -217,6 +142,7 @@ func convertRequestToIR(from provider.Format, model string, payload []byte, meta
 	}
 
 	normalizeIRLimits(irReq.Model, irReq)
+	preprocess.Apply(irReq)
 
 	return irReq, nil
 }
@@ -289,65 +215,6 @@ func extractThinkingFromMetadata(metadata map[string]any) (budget *int, include 
 	}
 
 	return budget, include, hasOverride
-}
-
-func applyPayloadConfigToIR(cfg *config.Config, model string, payload []byte) []byte {
-	if cfg == nil || len(payload) == 0 {
-		return payload
-	}
-
-	for _, rule := range cfg.Payload.Default {
-		if matchesPayloadRule(rule, model, "gemini") {
-			for path, value := range rule.Params {
-				fullPath := "request." + path
-				if !gjson.GetBytes(payload, fullPath).Exists() {
-					payload, _ = sjson.SetBytes(payload, fullPath, value)
-				}
-			}
-		}
-	}
-
-	for _, rule := range cfg.Payload.Override {
-		if matchesPayloadRule(rule, model, "gemini") {
-			for path, value := range rule.Params {
-				fullPath := "request." + path
-				payload, _ = sjson.SetBytes(payload, fullPath, value)
-			}
-		}
-	}
-
-	return payload
-}
-
-func matchesPayloadRule(rule config.PayloadRule, model, protocol string) bool {
-	for _, m := range rule.Models {
-		if m.Protocol != "" && m.Protocol != protocol {
-			continue
-		}
-		if matchesPattern(m.Name, model) {
-			return true
-		}
-	}
-	return false
-}
-
-func matchesPattern(pattern, name string) bool {
-	if pattern == name {
-		return true
-	}
-	if pattern == "*" {
-		return true
-	}
-	if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
-		return strings.Contains(name, pattern[1:len(pattern)-1])
-	}
-	if strings.HasPrefix(pattern, "*") {
-		return strings.HasSuffix(name, pattern[1:])
-	}
-	if strings.HasSuffix(pattern, "*") {
-		return strings.HasPrefix(name, pattern[:len(pattern)-1])
-	}
-	return false
 }
 
 func TranslateToCodex(cfg *config.Config, from provider.Format, model string, payload []byte, streaming bool, metadata map[string]any) ([]byte, error) {

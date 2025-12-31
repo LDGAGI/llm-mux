@@ -9,11 +9,11 @@ import (
 	"sync"
 
 	"github.com/nghyane/llm-mux/internal/config"
+	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/translator/from_ir"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
-	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/tidwall/gjson"
 )
 
@@ -339,9 +339,9 @@ func (p *GeminiCLIStreamProcessor) ProcessLine(payload []byte) ([][]byte, *ir.Us
 	var events []ir.UnifiedEvent
 	var err error
 	if p.Translator.ctx.ToolSchemaCtx != nil {
-		events, err = (&from_ir.GeminiCLIProvider{}).ParseStreamChunkWithContext(payload, p.Translator.ctx.ToolSchemaCtx)
+		events, err = (&from_ir.VertexEnvelopeProvider{}).ParseStreamChunkWithContext(payload, p.Translator.ctx.ToolSchemaCtx)
 	} else {
-		events, err = (&from_ir.GeminiCLIProvider{}).ParseStreamChunk(payload)
+		events, err = (&from_ir.VertexEnvelopeProvider{}).ParseStreamChunk(payload)
 	}
 	if err != nil {
 		return nil, nil, err

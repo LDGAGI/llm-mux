@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"github.com/nghyane/llm-mux/internal/config"
+	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
+	"github.com/nghyane/llm-mux/internal/translator/preprocess"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
-	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/tidwall/sjson"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -158,6 +159,9 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth,
 	translation, err := TranslateToGeminiWithTokens(e.cfg, from, req.Model, req.Payload, true, req.Metadata)
 	if err != nil {
 		return nil, fmt.Errorf("translate request: %w", err)
+	}
+	if translation.IR != nil {
+		preprocess.Apply(translation.IR)
 	}
 
 	body := translation.Payload
