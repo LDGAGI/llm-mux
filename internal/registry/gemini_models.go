@@ -37,11 +37,11 @@ var geminiModels = []*ModelInfo{
 
 // claudeViaAntigravityModels defines Claude models accessed via Antigravity (gemini-cli only).
 var claudeViaAntigravityModels = []*ModelInfo{
-	ClaudeVia("claude-sonnet-4-5", "gemini-cli").Display("Claude Sonnet 4.5").
+	ClaudeVia("claude-sonnet-4-5", "antigravity").Display("Claude Sonnet 4.5").
 		Desc("Claude Sonnet 4.5 via google antigravity").Version("4.5").Created(1759104000).B(),
-	ClaudeVia("claude-sonnet-4-5-thinking", "gemini-cli").Display("Claude Sonnet 4.5 Thinking").
+	ClaudeVia("claude-sonnet-4-5-thinking", "antigravity").Display("Claude Sonnet 4.5 Thinking").
 		Desc("Claude Sonnet 4.5 with extended thinking via google antigravity").Version("4.5").Created(1759104000).Thinking(1024, 100000).B(),
-	ClaudeVia("claude-opus-4-5-thinking", "gemini-cli").Display("Claude Opus 4.5 Thinking").
+	ClaudeVia("claude-opus-4-5-thinking", "antigravity").Display("Claude Opus 4.5 Thinking").
 		Desc("Claude Opus 4.5 with extended thinking via google antigravity").Version("4.5").Created(1761955200).Thinking(1024, 100000).B(),
 }
 

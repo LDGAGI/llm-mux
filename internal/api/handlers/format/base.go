@@ -340,9 +340,20 @@ func (h *BaseAPIHandler) WriteErrorResponse(c *gin.Context, msg *interfaces.Erro
 	}
 	c.Status(status)
 	if msg != nil && msg.Error != nil {
-		_, _ = c.Writer.Write([]byte(msg.Error.Error()))
+		errResp := ErrorResponse{
+			Error: ErrorDetail{
+				Message: msg.Error.Error(),
+				Type:    "server_error",
+			},
+		}
+		c.JSON(status, errResp)
 	} else {
-		_, _ = c.Writer.Write([]byte(http.StatusText(status)))
+		c.JSON(status, ErrorResponse{
+			Error: ErrorDetail{
+				Message: http.StatusText(status),
+				Type:    "server_error",
+			},
+		})
 	}
 }
 

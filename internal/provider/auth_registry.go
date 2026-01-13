@@ -889,11 +889,13 @@ func (r *AuthRegistry) Pick(ctx context.Context, provider, model string, opts Op
 
 		blocked, reason, retryAt := entry.IsBlockedForModel(model, now)
 		if blocked {
-			if reason == blockReasonCooldown {
-				cooldownCount++
-				if earliest.IsZero() || retryAt.Before(earliest) {
+			if reason == blockReasonCooldown || reason == blockReasonOther {
+				if !retryAt.IsZero() && (earliest.IsZero() || retryAt.Before(earliest)) {
 					earliest = retryAt
 				}
+			}
+			if reason == blockReasonCooldown {
+				cooldownCount++
 			}
 			continue
 		}
@@ -902,7 +904,7 @@ func (r *AuthRegistry) Pick(ctx context.Context, provider, model string, opts Op
 	}
 
 	if len(available) == 0 {
-		if cooldownCount == len(auths) && !earliest.IsZero() {
+		if !earliest.IsZero() {
 			resetIn := earliest.Sub(now)
 			if resetIn < 0 {
 				resetIn = 0

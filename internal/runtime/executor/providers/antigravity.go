@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -87,7 +88,7 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *provider.Auth, 
 	translated := cloudcode.RequestEnvelope(geminiPayload)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
-	httpClient := e.NewHTTPClient(ctx, auth, 0)
+	httpClient := e.NewHTTPClient(ctx, auth, executor.AntigravityRetryMaxDelay)
 	handler := executor.NewRetryHandler(executor.AntigravityRetryConfig())
 
 	var lastStatus int
@@ -228,7 +229,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *provider.
 	translated := cloudcode.RequestEnvelope(translation.Payload)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
-	httpClient := e.NewHTTPClient(ctx, auth, 0)
+	httpClient := e.NewHTTPClient(ctx, auth, 0) // No timeout for streaming - response body read is continuous
 	handler := executor.NewRetryHandler(executor.AntigravityRetryConfig())
 
 	var lastStatus int
@@ -653,15 +654,24 @@ func resolveUserAgent(auth *provider.Auth) string {
 	return executor.DefaultAntigravityUserAgent
 }
 
+var antigravityURLIndex atomic.Uint32
+
+var antigravityBaseURLs = []string{
+	executor.AntigravityBaseURLSandboxDaily,
+	executor.AntigravityBaseURLSandboxAutopush,
+	executor.AntigravityBaseURLProd,
+}
+
 func antigravityBaseURLFallbackOrder(auth *provider.Auth) []string {
 	if base := resolveCustomAntigravityBaseURL(auth); base != "" {
 		return []string{base}
 	}
-	return []string{
-		executor.AntigravityBaseURLSandboxDaily,
-		executor.AntigravityBaseURLSandboxAutopush,
-		executor.AntigravityBaseURLProd,
+	idx := int(antigravityURLIndex.Add(1) % uint32(len(antigravityBaseURLs)))
+	rotated := make([]string, len(antigravityBaseURLs))
+	for i := range antigravityBaseURLs {
+		rotated[i] = antigravityBaseURLs[(idx+i)%len(antigravityBaseURLs)]
 	}
+	return rotated
 }
 
 func resolveCustomAntigravityBaseURL(auth *provider.Auth) string {

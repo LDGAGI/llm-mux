@@ -148,15 +148,17 @@ func (s *RoundRobinSelector) Pick(ctx context.Context, provider, model string, o
 			available = append(available, candidate)
 			continue
 		}
-		if reason == blockReasonCooldown {
-			cooldownCount++
+		if reason == blockReasonCooldown || reason == blockReasonOther {
 			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
 				earliest = next
 			}
 		}
+		if reason == blockReasonCooldown {
+			cooldownCount++
+		}
 	}
 	if len(available) == 0 {
-		if cooldownCount == len(auths) && !earliest.IsZero() {
+		if !earliest.IsZero() {
 			resetIn := earliest.Sub(now)
 			if resetIn < 0 {
 				resetIn = 0

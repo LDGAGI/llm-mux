@@ -18,6 +18,7 @@ type RetryConfig struct {
 	MaxRetries       int
 	BaseDelay        time.Duration
 	MaxDelay         time.Duration
+	FallbackDelay    time.Duration
 	RetryStatusCodes []int
 	FallbackCodes    []int
 	RetryOnErrors    bool
@@ -57,6 +58,7 @@ func DefaultRetryConfig() RetryConfig {
 		MaxRetries:       1,
 		BaseDelay:        RateLimitBaseDelay,
 		MaxDelay:         RateLimitMaxDelay,
+		FallbackDelay:    100 * time.Millisecond,
 		RetryStatusCodes: []int{500},
 		FallbackCodes:    []int{429, 502, 503, 504},
 		RetryOnErrors:    true,
@@ -68,6 +70,7 @@ func AntigravityRetryConfig() RetryConfig {
 		MaxRetries:       1,
 		BaseDelay:        AntigravityRetryBaseDelay,
 		MaxDelay:         AntigravityRetryMaxDelay,
+		FallbackDelay:    0, // No delay: sandbox/prod URLs have independent rate limits
 		RetryStatusCodes: []int{500},
 		FallbackCodes:    []int{429, 502, 503, 504},
 		RetryOnErrors:    true,
@@ -118,16 +121,18 @@ func (h *RetryHandler) HandleResponse(ctx context.Context, statusCode int, body 
 		}
 	}
 
-	// Fallback codes (429, 503) should immediately try next target if available.
-	// This allows Provider Manager to handle cross-auth/cross-provider fallback.
 	if isFallbackCode {
 		if hasNextTarget {
+			if h.config.FallbackDelay > 0 {
+				select {
+				case <-ctx.Done():
+					return RetryActionFail, ctx.Err()
+				case <-time.After(h.config.FallbackDelay):
+				}
+			}
 			log.Debugf("retry_handler: status %d, trying next executor target", statusCode)
 			return RetryActionContinueNext, nil
 		}
-		// No more executor-level targets (e.g., base URLs exhausted).
-		// Return error to Provider Manager for cross-account rotation.
-		// This is expected behavior for quota exhaustion (429).
 		log.Debugf("retry_handler: status %d, executor targets exhausted, returning to manager for account rotation", statusCode)
 		return RetryActionFail, nil
 	}
@@ -327,7 +332,8 @@ func parseRetryDelay(errorBody []byte) (*time.Duration, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to parse duration: %w", err)
 				}
-				return &duration, nil
+				capped := capQuotaDelay(duration)
+				return &capped, nil
 			}
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -224,7 +225,7 @@ func RunSSEStream(
 						}
 					}
 				}
-				errorJSON := fmt.Sprintf(`data: {"error": {"message": "%s", "type": "server_error"}}`+"\n\n", err.Error())
+				errorJSON := fmt.Sprintf("event: error\ndata: {\"type\": \"error\", \"error\": {\"type\": \"server_error\", \"message\": \"%s\"}}\n\n", escapeJSONString(err.Error()))
 				pipeline.SendData([]byte(errorJSON))
 				return nil
 			}
@@ -266,7 +267,7 @@ func RunSSEStream(
 			if reporter != nil {
 				reporter.PublishFailure(ctx)
 			}
-			errorJSON := fmt.Sprintf(`data: {"error": {"message": "%s", "type": "server_error"}}`+"\n\n", errScan.Error())
+			errorJSON := fmt.Sprintf("event: error\ndata: {\"type\": \"error\", \"error\": {\"type\": \"server_error\", \"message\": \"%s\"}}\n\n", escapeJSONString(errScan.Error()))
 			pipeline.SendData([]byte(errorJSON))
 			return nil
 		}
@@ -414,4 +415,15 @@ func ConvertPipelineToStreamChunk(ctx context.Context, input <-chan streamutil.C
 		}
 	}()
 	return out
+}
+
+func escapeJSONString(s string) string {
+	r := strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		"\n", `\n`,
+		"\r", `\r`,
+		"\t", `\t`,
+	)
+	return r.Replace(s)
 }
