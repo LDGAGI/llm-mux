@@ -29,7 +29,7 @@ type UsageReporter interface {
 
 const (
 	DefaultStreamBufferSize  = 2 * 1024 * 1024
-	DefaultScannerBufferSize = 64 * 1024
+	DefaultScannerBufferSize = 256 * 1024 // 256KB - increased from 64KB for better SSE streaming performance
 	DefaultStreamIdleTimeout = 5 * time.Minute
 )
 
@@ -395,7 +395,7 @@ func (p *GeminiStreamProcessor) ProcessDone() ([][]byte, error) {
 }
 
 func ConvertPipelineToStreamChunk(ctx context.Context, input <-chan streamutil.Chunk) <-chan provider.StreamChunk {
-	out := make(chan provider.StreamChunk, 128)
+	out := make(chan provider.StreamChunk, 512) // Increased from 128 for better streaming throughput
 	go func() {
 		defer close(out)
 		for {
