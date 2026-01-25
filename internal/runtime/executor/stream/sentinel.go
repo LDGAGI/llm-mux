@@ -3,7 +3,26 @@ package stream
 import (
 	"bytes"
 	"errors"
+	"hash"
 	"hash/fnv"
+	"strings"
+	"sync"
+)
+
+var (
+	// FNV hasher pool for reducing allocations in hot path
+	fnvPool = sync.Pool{
+		New: func() interface{} {
+			return fnv.New64a()
+		},
+	}
+
+	// Buffer pool for chunk copies
+	bufferPool = sync.Pool{
+		New: func() interface{} {
+			return new([]byte)
+		},
+	}
 )
 
 const (
@@ -81,13 +100,13 @@ type StreamSentinel struct {
 	MaxBytes         int // Tail buffer size (default: 16KB)
 
 	// State
-	ring      [][]byte // Ring buffer of recent chunks
-	hashes    []uint64 // FNV-1a hashes for boundary-shifted detection
-	idx       int      // Current position in ring
-	count     int      // Total chunks processed
-	repeatCnt int      // Consecutive exact repeat count
-	hashCnt   int      // Consecutive hash repeat count
-	warned    bool     // Warning sent flag
+	ring           [][]byte // Ring buffer of recent chunks
+	hashes         []uint64 // FNV-1a hashes for boundary-shifted detection
+	idx            int      // Current position in ring
+	count          int      // Total chunks processed
+	repeatCnt      int      // Consecutive exact repeat count
+	hashMatchCount int      // Count of hash matches in window (not consecutive)
+	warned         bool     // Warning sent flag
 
 	// Callbacks
 	OnWarning func(reason string)
@@ -126,10 +145,16 @@ func (s *StreamSentinel) Check(chunk []byte) (warning error, err error) {
 		return nil, nil
 	}
 
-	// Calculate FNV-1a hash of the chunk
-	h := fnv.New64a()
+	// Get FNV hasher from pool to reduce allocations
+	h := fnvPool.Get().(hash.Hash64)
+	defer fnvPool.Put(h)
+	h.Reset()
 	h.Write(chunk)
 	currentHash := h.Sum64()
+
+	// Get buffer from pool for chunk copy
+	bufPtr := bufferPool.Get().(*[]byte)
+	defer bufferPool.Put(bufPtr)
 
 	// Get the previous chunk for exact comparison
 	var prevChunk []byte
@@ -147,11 +172,11 @@ func (s *StreamSentinel) Check(chunk []byte) (warning error, err error) {
 		s.repeatCnt = 0
 	}
 
-	// Check for hash repeat (boundary-shifted repetition)
-	s.hashCnt = 0
+	// Check for hash match (same hash appears multiple times in window)
+	s.hashMatchCount = 0
 	for _, hval := range s.hashes {
 		if hval == currentHash && hval != 0 {
-			s.hashCnt++
+			s.hashMatchCount++
 		}
 	}
 
@@ -160,22 +185,24 @@ func (s *StreamSentinel) Check(chunk []byte) (warning error, err error) {
 
 	// Store chunk in ring buffer if we have space
 	if s.count < cap(s.ring) {
-		// Copy chunk to avoid referencing scanner buffer
-		chunkCopy := make([]byte, len(chunk))
-		copy(chunkCopy, chunk)
-		s.ring = append(s.ring, chunkCopy)
+		// Copy chunk using pooled buffer
+		*bufPtr = append(*bufPtr, chunk...)
+		s.ring = append(s.ring, *bufPtr)
+		// Reset buffer for next use (keep capacity)
+		*bufPtr = (*bufPtr)[:0]
 	} else {
-		// Copy into ring buffer at current position
-		chunkCopy := make([]byte, len(chunk))
-		copy(chunkCopy, chunk)
-		s.ring[s.idx] = chunkCopy
+		// Copy into ring buffer using pooled buffer
+		*bufPtr = append(*bufPtr, chunk...)
+		s.ring[s.idx] = *bufPtr
 		s.idx = (s.idx + 1) % len(s.ring)
+		// Reset buffer for next use (keep capacity)
+		*bufPtr = (*bufPtr)[:0]
 	}
 
 	s.count++
 
 	// Build reason string
-	var reason stringsBuilder
+	var reason strings.Builder
 
 	// Check thresholds and trigger/warn
 	// Exact repeat detection
@@ -187,7 +214,7 @@ func (s *StreamSentinel) Check(chunk []byte) (warning error, err error) {
 	}
 
 	// Hash repeat detection
-	if s.hashCnt >= s.MaxHashRepeats {
+	if s.hashMatchCount >= s.MaxHashRepeats {
 		if s.OnTrigger != nil {
 			s.OnTrigger("hash repeat detected")
 		}
@@ -212,26 +239,10 @@ func (s *StreamSentinel) Reset() {
 	s.idx = 0
 	s.count = 0
 	s.repeatCnt = 0
-	s.hashCnt = 0
+	s.hashMatchCount = 0
 	s.warned = false
 	clearSlice(s.ring)
 	clearSlice(s.hashes)
-}
-
-// stringsBuilder is a simple wrapper for building reason strings
-type stringsBuilder struct {
-	s string
-}
-
-func (b *stringsBuilder) WriteString(s string) {
-	if b.s != "" {
-		b.s += ", "
-	}
-	b.s += s
-}
-
-func (b *stringsBuilder) String() string {
-	return b.s
 }
 
 // clearSlice clears a slice of any type

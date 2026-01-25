@@ -143,9 +143,11 @@ func (s *LineScanner) Scan() bool {
 		return false
 	}
 	if err == bufio.ErrBufferFull {
-		// Line too long - truncate and continue
+		// Line too long - copy partial data to preserve it
 		s.err = &LineTooLongError{MaxSize: s.maxSize}
-		s.line = s.buf
+		partial := make([]byte, len(s.line))
+		copy(partial, s.line)
+		s.line = partial
 		return false
 	}
 	if err != nil {
