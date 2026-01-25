@@ -81,23 +81,10 @@ func (w *ResponseWriterWrapper) Write(data []byte) (int, error) {
 	// THEN: Handle logging based on response type
 	if w.isStreaming {
 		// For streaming responses: Send to async logging channel (non-blocking)
-		// Optimization: Sample and truncate large chunks to avoid memory issues
+		// Single user install: log all chunks for full debugging
 		if w.chunkChannel != nil {
-			w.chunkCounter++
-
-			// Skip logging for sampled chunks (reduce overhead)
-			if w.chunkCounter%LogSamplingRate != 0 {
-				return n, err
-			}
-
-			// Truncate large chunks for logging (avoid memory issues)
-			logData := data
-			if len(data) > MaxChunkSizeForLogging {
-				logData = data[:MaxChunkSizeForLogging]
-			}
-
 			select {
-			case w.chunkChannel <- logData:
+			case w.chunkChannel <- data: // Single user: log full data
 			default: // Channel full, skip logging to avoid blocking
 			}
 		}

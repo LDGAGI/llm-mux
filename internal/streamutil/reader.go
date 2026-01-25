@@ -21,12 +21,13 @@ type StreamReaderConfig struct {
 	Name string
 }
 
-// DefaultStreamReaderConfig returns sensible defaults.
+// DefaultStreamReaderConfig returns sensible defaults for single-user install.
+// Optimized for maximum single-stream performance.
 func DefaultStreamReaderConfig() StreamReaderConfig {
 	return StreamReaderConfig{
 		IdleTimeout: 5 * time.Minute,
-		BufferSize:  256 * 1024,       // 256KB for better streaming throughput
-		MaxLineSize: 10 * 1024 * 1024, // 10MB for large SSE events
+		BufferSize:  1024 * 1024,      // 1MB - single user, maximize performance
+		MaxLineSize: 50 * 1024 * 1024, // 50MB - single user, handle large responses
 		Name:        "stream",
 	}
 }
