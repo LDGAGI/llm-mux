@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -29,7 +28,7 @@ type UsageReporter interface {
 
 const (
 	DefaultStreamBufferSize  = 2 * 1024 * 1024
-	DefaultScannerBufferSize = 64 * 1024
+	DefaultScannerBufferSize = 256 * 1024 // 256KB - increased from 64KB for better SSE streaming performance
 	DefaultStreamIdleTimeout = 5 * time.Minute
 )
 
@@ -149,23 +148,19 @@ func RunSSEStream(
 			}
 		}()
 
-		// Use StreamReader for context-aware cancellation and idle detection
+		// Use LineScanner from streamutil with bufio.Reader.ReadSlice for large SSE events
+		// Supports lines up to 10MB (vs bufio.Scanner's 64KB initial limit)
 		idleTimeout := cfg.IdleTimeout
 		if idleTimeout == 0 {
 			idleTimeout = DefaultStreamIdleTimeout
 		}
-		streamReader := NewStreamReader(ctx, body, idleTimeout, cfg.ExecutorName)
-		defer streamReader.Close()
-
-		bufPtr := ScannerBufferPool.Get().(*[]byte)
-		defer ScannerBufferPool.Put(bufPtr)
-
-		scanner := bufio.NewScanner(streamReader)
-		maxBufferSize := cfg.MaxBufferSize
-		if maxBufferSize == 0 {
-			maxBufferSize = DefaultStreamBufferSize
+		readerCfg := streamutil.StreamReaderConfig{
+			IdleTimeout: idleTimeout,
+			BufferSize:  256 * 1024,       // 256KB buffer for better streaming throughput
+			MaxLineSize: 10 * 1024 * 1024, // 10MB for large SSE events
 		}
-		scanner.Buffer(*bufPtr, maxBufferSize)
+		scanner := streamutil.NewLineScanner(ctx, body, readerCfg)
+		defer scanner.Close()
 
 		for scanner.Scan() {
 			select {
@@ -395,7 +390,7 @@ func (p *GeminiStreamProcessor) ProcessDone() ([][]byte, error) {
 }
 
 func ConvertPipelineToStreamChunk(ctx context.Context, input <-chan streamutil.Chunk) <-chan provider.StreamChunk {
-	out := make(chan provider.StreamChunk, 128)
+	out := make(chan provider.StreamChunk, 512) // Increased from 128 for better streaming throughput
 	go func() {
 		defer close(out)
 		for {
