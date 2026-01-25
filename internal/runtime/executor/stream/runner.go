@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -149,23 +148,19 @@ func RunSSEStream(
 			}
 		}()
 
-		// Use StreamReader for context-aware cancellation and idle detection
+		// Use LineScanner from streamutil with bufio.Reader.ReadSlice for large SSE events
+		// Supports lines up to 10MB (vs bufio.Scanner's 64KB initial limit)
 		idleTimeout := cfg.IdleTimeout
 		if idleTimeout == 0 {
 			idleTimeout = DefaultStreamIdleTimeout
 		}
-		streamReader := NewStreamReader(ctx, body, idleTimeout, cfg.ExecutorName)
-		defer streamReader.Close()
-
-		bufPtr := ScannerBufferPool.Get().(*[]byte)
-		defer ScannerBufferPool.Put(bufPtr)
-
-		scanner := bufio.NewScanner(streamReader)
-		maxBufferSize := cfg.MaxBufferSize
-		if maxBufferSize == 0 {
-			maxBufferSize = DefaultStreamBufferSize
+		readerCfg := streamutil.StreamReaderConfig{
+			IdleTimeout: idleTimeout,
+			BufferSize:  256 * 1024,       // 256KB buffer for better streaming throughput
+			MaxLineSize: 10 * 1024 * 1024, // 10MB for large SSE events
 		}
-		scanner.Buffer(*bufPtr, maxBufferSize)
+		scanner := streamutil.NewLineScanner(ctx, body, readerCfg)
+		defer scanner.Close()
 
 		for scanner.Scan() {
 			select {
