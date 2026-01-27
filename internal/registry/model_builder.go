@@ -153,6 +153,19 @@ func (b *ModelBuilder) Thinking(min, max int) *ModelBuilder {
 	return b
 }
 
+// ThinkingWithLevel sets thinking support with default level and budgets per level.
+// The budgets parameter should have Low, Medium, High, Max values.
+func (b *ModelBuilder) ThinkingWithLevel(defaultLevel ThinkingLevel, budgets ThinkingBudgets, min, max int) *ModelBuilder {
+	b.info.Thinking = &ThinkingSupport{
+		Min:            min,
+		Max:            max,
+		DefaultLevel:   defaultLevel,
+		Budgets:        budgets,
+		DynamicAllowed: true,
+	}
+	return b
+}
+
 // ThinkingFull sets thinking support with all options.
 func (b *ModelBuilder) ThinkingFull(min, max int, zeroAllowed, dynamicAllowed bool) *ModelBuilder {
 	b.info.Thinking = &ThinkingSupport{

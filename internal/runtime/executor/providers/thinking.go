@@ -1,10 +1,9 @@
 package providers
 
 import (
-	"strings"
-
 	"github.com/nghyane/llm-mux/internal/registry"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
+	"github.com/nghyane/llm-mux/internal/util"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -16,47 +15,23 @@ type ThinkingConfig struct {
 	BudgetTokens int
 }
 
-// ThinkingBudgetLevels defines token budgets for different thinking intensity levels.
-// Reference: opencode-antigravity-auth npm package
-var ThinkingBudgetLevels = struct {
-	Low    int
-	Medium int
-	High   int
-	Max    int
-}{
-	Low:    8192,  // Matches npm: low = 8192
-	Medium: 16384, // Matches npm: medium tier
-	High:   24576, // Matches npm: high tier
-	Max:    32768, // Matches npm: max = 32768
-}
-
 // ParseClaudeThinkingFromModel extracts thinking configuration from a Claude model name suffix.
-// Returns a ThinkingConfig based on the model suffix:
-//   - "-thinking-low": 8192 tokens
-//     "-thinking-medium": 16384 tokens
-//   - "-thinking-high": 24576 tokens
-//   - "-thinking" or "-thinking-max": 32768 tokens (max)
-//
+// Uses single source of truth from registry via util.GetThinkingBudget.
 // Returns nil if the model doesn't have a thinking suffix.
 func ParseClaudeThinkingFromModel(modelName string) *ThinkingConfig {
-	var budgetTokens int
-	switch {
-	case strings.HasSuffix(modelName, "-thinking-low"):
-		budgetTokens = ThinkingBudgetLevels.Low
-	case strings.HasSuffix(modelName, "-thinking-medium"):
-		budgetTokens = ThinkingBudgetLevels.Medium
-	case strings.HasSuffix(modelName, "-thinking-high"):
-		budgetTokens = ThinkingBudgetLevels.High
-	case strings.HasSuffix(modelName, "-thinking-max"):
-		budgetTokens = ThinkingBudgetLevels.Max
-	case strings.HasSuffix(modelName, "-thinking"):
-		budgetTokens = ThinkingBudgetLevels.Max // Default to max (matches npm package)
-	default:
+	suffixLevel, isThinking := util.ParseThinkingSuffix(modelName)
+	if !isThinking {
 		return nil
 	}
+
+	budget, _ := util.GetThinkingBudget(modelName, suffixLevel, 0)
+	if budget <= 0 {
+		return nil
+	}
+
 	return &ThinkingConfig{
 		Enabled:      true,
-		BudgetTokens: budgetTokens,
+		BudgetTokens: budget,
 	}
 }
 

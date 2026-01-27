@@ -77,6 +77,12 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *provider.Auth, req p
 	}
 	if budgetOverride, includeOverride, ok := util.GeminiThinkingFromMetadata(req.Metadata); ok && util.ModelSupportsThinking(req.Model) {
 		body = util.ApplyGeminiThinkingConfig(body, budgetOverride, includeOverride)
+	} else {
+		// Auto-apply thinking from registry for models with DefaultLevel
+		budget, include := util.GetThinkingBudget(req.Model, "", 0)
+		if include {
+			body = util.ApplyGeminiThinkingConfig(body, &budget, &include)
+		}
 	}
 	body = util.StripThinkingConfigIfUnsupported(req.Model, body)
 	body = e.ApplyPayloadConfig(req.Model, body)

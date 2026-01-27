@@ -6,24 +6,36 @@ package registry
 // Shared Gemini Model Definitions
 // =============================================================================
 
+// DefaultThinkingBudgetsForGemini provides standard level-to-budget mapping for Gemini models.
+var DefaultThinkingBudgetsForGemini = ThinkingBudgets{
+	Low:    1024,
+	Medium: 8192,
+	High:   32768,
+	Max:    32768,
+}
+
 // geminiModels defines metadata for Gemini-family models (used by all Google providers).
 // Models not in this list will use upstream values directly (passthrough).
 var geminiModels = []*ModelInfo{
 	// Gemini 3.x
 	Gemini("gemini-3-pro-high").Display("Gemini 3 Pro").
-		Desc("Gemini 3 Pro").Version("3.0").Created(1731888000).Thinking(128, 32768).B(),
+		Desc("Gemini 3 Pro").Version("3.0").Created(1731888000).
+		ThinkingWithLevel(ThinkingLevelHigh, DefaultThinkingBudgetsForGemini, 128, 32768).B(),
 	Gemini("gemini-3-pro-low").Display("Gemini 3 Pro Low").
 		Desc("Gemini 3 Pro Low").Version("3.0").Created(1731888000).B(),
 	Gemini("gemini-3-flash").Display("Gemini 3 Flash").
-		Desc("Gemini 3 Flash").Version("3.0").Created(1737158400).Thinking(128, 32768).B(),
+		Desc("Gemini 3 Flash").Version("3.0").Created(1737158400).
+		ThinkingWithLevel(ThinkingLevelHigh, DefaultThinkingBudgetsForGemini, 128, 32768).B(),
 	Gemini("gemini-3-flash-preview").Display("Gemini 3 Flash Preview").
-		Desc("Gemini 3 Flash Preview").Version("3.0").Created(1737158400).Thinking(128, 32768).B(),
+		Desc("Gemini 3 Flash Preview").Version("3.0").Created(1737158400).
+		ThinkingWithLevel(ThinkingLevelHigh, DefaultThinkingBudgetsForGemini, 128, 32768).B(),
 	Gemini("gemini-3-pro-image-preview").Display("Gemini 3 Pro Image Preview").
 		Desc("Gemini 3 Pro Image Preview").Version("3.0").Created(1737158400).B(),
 
 	// Gemini 2.5
 	Gemini("gemini-2.5-pro").Display("Gemini 2.5 Pro").
-		Desc("Stable release (June 17th, 2025) of Gemini 2.5 Pro").Version("2.5").Created(1750118400).Thinking(128, 32768).B(),
+		Desc("Stable release (June 17th, 2025) of Gemini 2.5 Pro").Version("2.5").Created(1750118400).
+		ThinkingWithLevel(ThinkingLevelHigh, DefaultThinkingBudgetsForGemini, 128, 32768).B(),
 	Gemini("gemini-2.5-flash").Display("Gemini 2.5 Flash").
 		Desc("Stable version of Gemini 2.5 Flash, our mid-size multimodal model that supports up to 1 million tokens, released in June of 2025.").
 		Version("001").Created(1750118400).ThinkingFull(0, 24576, true, true).B(),
@@ -42,9 +54,11 @@ var claudeViaAntigravityModels = []*ModelInfo{
 	ClaudeVia("claude-sonnet-4-5", "antigravity").Display("Claude Sonnet 4.5").
 		Desc("Claude Sonnet 4.5 via google antigravity").Version("4.5").Created(1759104000).B(),
 	ClaudeVia("claude-sonnet-4-5-thinking", "antigravity").Display("Claude Sonnet 4.5 Thinking").
-		Desc("Claude Sonnet 4.5 with extended thinking via google antigravity").Version("4.5").Created(1759104000).Thinking(8192, 32768).B(),
+		Desc("Claude Sonnet 4.5 with extended thinking via google antigravity").Version("4.5").Created(1759104000).
+		ThinkingWithLevel(ThinkingLevelHigh, DefaultThinkingBudgetsForClaude, 8192, 32768).B(),
 	ClaudeVia("claude-opus-4-5-thinking", "antigravity").Display("Claude Opus 4.5 Thinking").
-		Desc("Claude Opus 4.5 with extended thinking via google antigravity").Version("4.5").Created(1761955200).Thinking(8192, 32768).B(),
+		Desc("Claude Opus 4.5 with extended thinking via google antigravity").Version("4.5").Created(1761955200).
+		ThinkingWithLevel(ThinkingLevelHigh, DefaultThinkingBudgetsForClaude, 8192, 32768).B(),
 }
 
 // =============================================================================

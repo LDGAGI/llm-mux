@@ -29,11 +29,29 @@ type ModelInfo struct {
 	Hidden                     bool             `json:"-"`
 }
 
+type ThinkingLevel string
+
+const (
+	ThinkingLevelLow    ThinkingLevel = "low"
+	ThinkingLevelMedium ThinkingLevel = "medium"
+	ThinkingLevelHigh   ThinkingLevel = "high"
+	ThinkingLevelMax    ThinkingLevel = "max"
+)
+
+type ThinkingBudgets struct {
+	Low    int `json:"low,omitempty"`
+	Medium int `json:"medium,omitempty"`
+	High   int `json:"high,omitempty"`
+	Max    int `json:"max,omitempty"`
+}
+
 type ThinkingSupport struct {
-	Min            int  `json:"min,omitempty"`
-	Max            int  `json:"max,omitempty"`
-	ZeroAllowed    bool `json:"zero_allowed,omitempty"`
-	DynamicAllowed bool `json:"dynamic_allowed,omitempty"`
+	Min            int             `json:"min,omitempty"`
+	Max            int             `json:"max,omitempty"`
+	ZeroAllowed    bool            `json:"zero_allowed,omitempty"`
+	DynamicAllowed bool            `json:"dynamic_allowed,omitempty"`
+	DefaultLevel   ThinkingLevel   `json:"default_level,omitempty"`
+	Budgets        ThinkingBudgets `json:"budgets,omitempty"`
 }
 
 type ModelRegistration struct {
