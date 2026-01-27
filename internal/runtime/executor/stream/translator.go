@@ -77,15 +77,16 @@ func (s *StreamContext) EstimateReasoningTokens() int32 {
 
 // StreamTranslator handles format conversion with integrated buffering
 type StreamTranslator struct {
-	cfg            *config.Config
-	from           provider.Format
-	to             string
-	model          string
-	messageID      string
-	Ctx            *StreamContext
-	eventBuffer    EventBufferStrategy
-	chunkBuffer    ChunkBufferStrategy
-	streamMetaSent bool
+	cfg             *config.Config
+	from            provider.Format
+	to              string
+	model           string
+	messageID       string
+	Ctx             *StreamContext
+	eventBuffer     EventBufferStrategy
+	chunkBuffer     ChunkBufferStrategy
+	streamMetaSent  bool
+	pendingThinking *ir.UnifiedEvent // Claude: buffered thinking waiting for signature
 }
 
 func NewStreamTranslator(cfg *config.Config, from provider.Format, to, model, messageID string, Ctx *StreamContext) *StreamTranslator {
@@ -101,10 +102,11 @@ func NewStreamTranslator(cfg *config.Config, from provider.Format, to, model, me
 		Ctx:       Ctx,
 	}
 
-	if provider.IsGeminiFormat(to) {
+	if provider.IsClaudeFormat(to) {
 		st.eventBuffer = NewPassthroughEventBuffer()
-		st.chunkBuffer = NewGeminiDelayBuffer()
+		st.chunkBuffer = NewPassthroughBuffer() // Claude: no delay - thinking has signature from parser
 	} else {
+		// Gemini and other formats: no delay buffer - thinking streams immediately
 		st.eventBuffer = NewPassthroughEventBuffer()
 		st.chunkBuffer = NewPassthroughBuffer()
 	}

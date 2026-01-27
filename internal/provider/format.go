@@ -29,3 +29,8 @@ func (f Format) String() string {
 func IsGeminiFormat(format string) bool {
 	return format == "gemini" || format == "gemini-cli"
 }
+
+// IsClaudeFormat checks if a format string represents Claude format.
+func IsClaudeFormat(format string) bool {
+	return format == "claude"
+}
