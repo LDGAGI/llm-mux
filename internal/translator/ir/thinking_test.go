@@ -64,7 +64,7 @@ func TestEffortToThinkingLevel(t *testing.T) {
 		{"gemini-3-flash-preview", "medium", ThinkingLevelHigh}, // Per Gemini 3 docs: medium -> HIGH
 		{"gemini-3-flash-preview", "high", ThinkingLevelHigh},
 		{"gemini-3-flash-preview", "xhigh", ThinkingLevelHigh},
-		{"gemini-3-flash-preview", "", ThinkingLevelMedium}, // default for Flash
+		{"gemini-3-flash-preview", "", ThinkingLevelHigh}, // default for Flash (max thinking)
 
 		// Gemini 3 Pro - only LOW and HIGH
 		{"gemini-3-pro-preview", "none", ThinkingLevelLow},    // no MINIMAL for Pro
@@ -132,7 +132,7 @@ func TestDefaultThinkingLevel(t *testing.T) {
 		model    string
 		expected ThinkingLevel
 	}{
-		{"gemini-3-flash-preview", ThinkingLevelMedium},
+		{"gemini-3-flash-preview", ThinkingLevelHigh},
 		{"gemini-3-pro-preview", ThinkingLevelHigh},
 		{"gemini-3-pro-image-preview", ThinkingLevelHigh},
 	}

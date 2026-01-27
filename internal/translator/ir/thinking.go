@@ -114,7 +114,7 @@ func BudgetToThinkingLevel(model string, budget int) ThinkingLevel {
 
 func DefaultThinkingLevel(model string) ThinkingLevel {
 	if IsGemini3Flash(model) {
-		return ThinkingLevelMedium
+		return ThinkingLevelHigh
 	}
 	return ThinkingLevelHigh
 }
