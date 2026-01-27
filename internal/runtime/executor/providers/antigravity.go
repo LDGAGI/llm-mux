@@ -206,15 +206,32 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *provider.Auth, 
 }
 
 // extractJSONFromSSEError extracts JSON payload from SSE error response.
-// SSE error format: "event: error\ndata: {...}" -> returns the JSON content
+// SSE error format: "event: error\ndata: {...}" or just "data: {...}"
+// Returns the JSON content, or raw body if parsing fails.
 func extractJSONFromSSEError(body []byte) string {
 	if len(body) == 0 {
 		return string(body)
 	}
+
+	// Handle SSE format with "event:" prefix
+	// Example: "event: error\ndata: {"type": "error", ...}"
+	lines := strings.Split(string(body), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data:") {
+			// Extract JSON after "data:" prefix
+			payload := strings.TrimPrefix(line, "data:")
+			payload = strings.TrimPrefix(payload, " ") // Remove space after colon
+			return payload
+		}
+	}
+
+	// Fallback: try JSONPayload for simple "data: {...}" format
 	payload := sseutil.JSONPayload(body)
 	if payload != nil {
 		return string(payload)
 	}
+
 	return string(body)
 }
 
