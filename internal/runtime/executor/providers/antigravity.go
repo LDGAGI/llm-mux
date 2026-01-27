@@ -185,20 +185,37 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *provider.Auth, 
 		case executor.RetryActionFail:
 			log.Debugf("antigravity executor: upstream error status: %d, body: %s", httpResp.StatusCode, executor.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), bodyBytes))
 			retryAfter := executor.ParseQuotaRetryDelay(bodyBytes)
-			return resp, executor.NewStatusError(httpResp.StatusCode, string(bodyBytes), retryAfter)
+			// Extract JSON from SSE error response to avoid passing "event: error" prefix to client
+			errorMsg := extractJSONFromSSEError(bodyBytes)
+			return resp, executor.NewStatusError(httpResp.StatusCode, errorMsg, retryAfter)
 		}
 	}
 
 	switch {
 	case lastStatus != 0:
 		retryAfter := executor.ParseQuotaRetryDelay(lastBody)
-		err = executor.NewStatusError(lastStatus, string(lastBody), retryAfter)
+		// Extract JSON from SSE error response to avoid passing "event: error" prefix to client
+		errorMsg := extractJSONFromSSEError(lastBody)
+		err = executor.NewStatusError(lastStatus, errorMsg, retryAfter)
 	case lastErr != nil:
 		err = lastErr
 	default:
 		err = executor.NewStatusError(http.StatusServiceUnavailable, "antigravity executor: no base url available", nil)
 	}
 	return resp, err
+}
+
+// extractJSONFromSSEError extracts JSON payload from SSE error response.
+// SSE error format: "event: error\ndata: {...}" -> returns the JSON content
+func extractJSONFromSSEError(body []byte) string {
+	if len(body) == 0 {
+		return string(body)
+	}
+	payload := sseutil.JSONPayload(body)
+	if payload != nil {
+		return string(payload)
+	}
+	return string(body)
 }
 
 func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth, req provider.Request, opts provider.Options) (streamChan <-chan provider.StreamChunk, err error) {

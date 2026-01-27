@@ -17,6 +17,7 @@ import (
 	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/nghyane/llm-mux/internal/runtime/executor"
 	"github.com/nghyane/llm-mux/internal/runtime/executor/stream"
+	"github.com/nghyane/llm-mux/internal/sseutil"
 	"github.com/nghyane/llm-mux/internal/translator/ir"
 	"github.com/nghyane/llm-mux/internal/translator/to_ir"
 	"github.com/nghyane/llm-mux/internal/util"
@@ -267,8 +268,18 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth,
 
 	if from.String() == "claude" {
 		processor := &claudePassthroughProcessor{}
+
+		preprocessor := func(line []byte) ([]byte, bool) {
+			payload := sseutil.JSONPayload(line)
+			if payload == nil {
+				return nil, true
+			}
+			return payload, false
+		}
+
 		return stream.RunSSEStream(ctx, decodedBody, reporter, processor, stream.StreamConfig{
 			ExecutorName:       "claude",
+			Preprocessor:       preprocessor,
 			PassthroughOnEmpty: true,
 		}), nil
 	}
@@ -278,8 +289,18 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth,
 	processor := &claudeStreamProcessor{
 		translator: translator,
 	}
+
+	preprocessor := func(line []byte) ([]byte, bool) {
+		payload := sseutil.JSONPayload(line)
+		if payload == nil {
+			return nil, true
+		}
+		return payload, false
+	}
+
 	return stream.RunSSEStream(ctx, decodedBody, reporter, processor, stream.StreamConfig{
 		ExecutorName: "claude",
+		Preprocessor: preprocessor,
 	}), nil
 }
 
