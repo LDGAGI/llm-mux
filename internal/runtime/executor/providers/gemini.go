@@ -261,17 +261,19 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth,
 
 			line := scanner.Bytes()
 
-			if streamCtx.GeminiState.ActualInputTokens == 0 {
-				if tokens := sseutil.ExtractPromptTokenCount(line); tokens > 0 {
-					streamCtx.GeminiState.ActualInputTokens = tokens
-					streamCtx.GeminiState.ActualCacheTokens = sseutil.ExtractCacheTokenCount(line)
-				}
-			}
-
+			// Extract JSON payload first to skip non-JSON SSE lines
 			filtered := sseutil.FilterSSEUsageMetadata(line)
 			payload := sseutil.JSONPayload(filtered)
 			if len(payload) == 0 {
 				continue
+			}
+
+			// Only extract tokens from valid JSON payloads
+			if streamCtx.GeminiState.ActualInputTokens == 0 {
+				if tokens := sseutil.ExtractPromptTokenCount(payload); tokens > 0 {
+					streamCtx.GeminiState.ActualInputTokens = tokens
+					streamCtx.GeminiState.ActualCacheTokens = sseutil.ExtractCacheTokenCount(payload)
+				}
 			}
 
 			chunks, usage, err := processor.ProcessLine(bytes.Clone(payload))

@@ -277,10 +277,17 @@ func (e *VertexExecutor) executeStreamWithStrategy(ctx context.Context, auth *pr
 	}
 
 	preprocessor := func(line []byte) ([]byte, bool) {
+		// Extract JSON payload first to skip non-JSON SSE lines
+		payload := sseutil.JSONPayload(line)
+		if payload == nil {
+			return nil, true
+		}
+
+		// Only extract tokens from valid JSON payloads
 		if streamCtx.GeminiState.ActualInputTokens == 0 {
-			if tokens := sseutil.ExtractPromptTokenCount(line); tokens > 0 {
+			if tokens := sseutil.ExtractPromptTokenCount(payload); tokens > 0 {
 				streamCtx.GeminiState.ActualInputTokens = tokens
-				streamCtx.GeminiState.ActualCacheTokens = sseutil.ExtractCacheTokenCount(line)
+				streamCtx.GeminiState.ActualCacheTokens = sseutil.ExtractCacheTokenCount(payload)
 			}
 		}
 		return line, false
