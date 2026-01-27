@@ -117,6 +117,18 @@ func SendChunk(ctx context.Context, out chan<- provider.StreamChunk, chunk provi
 	}
 }
 
+// isExpectedEOF returns true if the error is an expected termination condition
+// (EOF or context cancellation) rather than an actual error that needs to be sent to the client.
+func isExpectedEOF(err error) bool {
+	if err == io.EOF {
+		return true
+	}
+	if err == context.Canceled {
+		return true
+	}
+	return strings.Contains(err.Error(), "EOF")
+}
+
 func IsDoneLine(line []byte) bool {
 	trimmed := bytes.TrimSpace(line)
 	if bytes.Equal(trimmed, doneMarker) {
@@ -288,7 +300,7 @@ func RunSSEStream(
 			}
 		}
 
-		if errScan := scanner.Err(); errScan != nil {
+		if errScan := scanner.Err(); errScan != nil && !isExpectedEOF(errScan) {
 			if reporter != nil {
 				reporter.PublishFailure(ctx)
 			}
