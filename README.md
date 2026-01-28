@@ -13,13 +13,13 @@
 
 ## 🎁 MiniMax Coding Plan - New Year Mega Offer!
 
-**🔥 GIẢM GIÁ 10% NGAY - Không cần voucher!**
+**🔥 GET 10% OFF INSTANTLY - No voucher needed!**
 
-Dùng link dưới đây để được giảm 10% ngay lập tức khi đăng ký MiniMax Coding Plan:
+Use the link below to get an immediate 10% discount when signing up for MiniMax Coding Plan:
 
 👉 **https://platform.minimax.io/subscribe/coding-plan?code=EljrpDLxkH&source=link**
 
-> 💡 **Tại sao nên dùng MiniMax?** Google Antigravity Claude đã bị bóp quota nghiêm trọng. MiniMax cung cấp chất lượng gần như tương đương, chi phí thấp hơn, tốc độ phản hồi nhanh hơn!
+> 💡 **Why MiniMax?** Google Antigravity Claude quotas have been heavily throttled. MiniMax offers nearly identical quality at a lower cost with faster response times!
 
 ---
 
