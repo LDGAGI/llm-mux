@@ -47,8 +47,15 @@ func buildClaudeVertexRequest(req *ir.UnifiedChatRequest) map[string]any {
 		root["generationConfig"] = gc
 	}
 
-	if len(req.Tools) > 0 {
-		root["tools"] = buildClaudeTools(req)
+	// Get cleaned tools without mutating the original request
+	cleanedTools, cleanedResponseSchema := ir.CleanedToolsForAntigravityClaude(req)
+	if len(cleanedTools) > 0 {
+		root["tools"] = buildCleanedClaudeTools(cleanedTools)
+	}
+
+	// Apply cleaned response schema if present
+	if cleanedResponseSchema != nil {
+		root["responseSchema"] = cleanedResponseSchema
 	}
 
 	return root
@@ -356,6 +363,26 @@ func buildClaudeTools(req *ir.UnifiedChatRequest) []any {
 	for _, t := range req.Tools {
 		params := ir.CleanJsonSchemaForGemini(ir.CopyMap(t.Parameters))
 		if params == nil {
+			params = map[string]any{"type": "object", "properties": map[string]any{}}
+		}
+		funcs = append(funcs, map[string]any{
+			"name":        t.Name,
+			"description": t.Description,
+			"parameters":  params,
+		})
+	}
+	return []any{map[string]any{"functionDeclarations": funcs}}
+}
+
+func buildCleanedClaudeTools(tools []ir.ToolDefinition) []any {
+	var funcs []any
+	for _, t := range tools {
+		params := t.Parameters
+		if params != nil {
+			params = ir.CleanJsonSchema(ir.CopyMap(params))
+			params["additionalProperties"] = false
+			delete(params, "$schema")
+		} else {
 			params = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
 		funcs = append(funcs, map[string]any{

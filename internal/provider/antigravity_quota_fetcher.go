@@ -32,12 +32,18 @@ var (
 	quotaFetchCount int64
 	quotaCacheHit   int64
 	quotaFetchGroup singleflight.Group
+	cleanOnce       sync.Once
 )
 
 func fetchAntigravityQuota(ctx context.Context, accessToken string) *RealQuotaSnapshot {
 	if accessToken == "" {
 		return nil
 	}
+
+	// Start cleanup goroutine once
+	cleanOnce.Do(func() {
+		go startQuotaCacheCleanup()
+	})
 
 	// Check cache first (fast path)
 	if cached := getCachedQuota(accessToken); cached != nil {
@@ -154,6 +160,22 @@ func GetQuotaStats() (fetches, hits int64, cacheSize int) {
 	quotaCacheMu.RLock()
 	defer quotaCacheMu.RUnlock()
 	return quotaFetchCount, quotaCacheHit, len(quotaCache)
+}
+
+func startQuotaCacheCleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		quotaCacheMu.Lock()
+		now := time.Now()
+		for token, entry := range quotaCache {
+			if now.Sub(entry.fetchedAt) > quotaCacheTTL*2 { // Grace period
+				delete(quotaCache, token)
+			}
+		}
+		quotaCacheMu.Unlock()
+	}
 }
 
 type quotaFetcherStats struct {

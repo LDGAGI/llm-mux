@@ -18,6 +18,4 @@ func applyClaudeDefaults(req *ir.UnifiedChatRequest) {
 		defaultMax := ir.ClaudeDefaultMaxTokens
 		req.MaxTokens = &defaultMax
 	}
-
-	ir.CleanToolsForAntigravityClaude(req)
 }

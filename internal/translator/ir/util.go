@@ -834,6 +834,8 @@ func cleanSchemaForClaudeRecursive(schema map[string]any) {
 // CleanToolsForAntigravityClaude cleans all tool parameter schemas for Claude models
 // accessed via Antigravity provider. Unlike CleanJsonSchemaForClaude, this does NOT
 // add $schema field since Antigravity rejects it.
+// NOTE: This function mutates the request's Tools slice. For non-mutating behavior,
+// use CleanedToolsForAntigravityClaude instead.
 func CleanToolsForAntigravityClaude(req *UnifiedChatRequest) {
 	if req == nil {
 		return
@@ -857,4 +859,44 @@ func CleanToolsForAntigravityClaude(req *UnifiedChatRequest) {
 		delete(schema, "$schema")
 		req.ResponseSchema = schema
 	}
+}
+
+// CleanedToolsForAntigravityClaude returns a cleaned copy of the tools and response schema
+// for Antigravity Claude provider without mutating the original request.
+// This preserves the original tool metadata (like "default", "const") for potential
+// fallback to OpenAI-compatible providers.
+func CleanedToolsForAntigravityClaude(req *UnifiedChatRequest) ([]ToolDefinition, map[string]any) {
+	var cleanedTools []ToolDefinition
+	if len(req.Tools) > 0 {
+		cleanedTools = make([]ToolDefinition, len(req.Tools))
+		for i := range req.Tools {
+			t := req.Tools[i]
+			cleanedParams := t.Parameters
+			if t.Parameters != nil {
+				params := CopyMap(t.Parameters)
+				params = CleanJsonSchema(params)
+				cleanSchemaForClaudeRecursive(params)
+				params["additionalProperties"] = false
+				delete(params, "$schema")
+				cleanedParams = params
+			}
+			cleanedTools[i] = ToolDefinition{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  cleanedParams,
+			}
+		}
+	}
+
+	var cleanedResponseSchema map[string]any
+	if req.ResponseSchema != nil {
+		schema := CopyMap(req.ResponseSchema)
+		schema = CleanJsonSchema(schema)
+		cleanSchemaForClaudeRecursive(schema)
+		schema["additionalProperties"] = false
+		delete(schema, "$schema")
+		cleanedResponseSchema = schema
+	}
+
+	return cleanedTools, cleanedResponseSchema
 }

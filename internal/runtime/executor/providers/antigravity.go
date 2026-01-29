@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,6 +51,7 @@ func alias2ModelName(modelID string) string {
 
 type AntigravityExecutor struct {
 	executor.BaseExecutor
+	refreshMu sync.Mutex
 }
 
 func NewAntigravityExecutor(cfg *config.Config) *AntigravityExecutor {
@@ -344,7 +346,9 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *provider.
 				continue
 			case executor.RetryActionFail:
 				retryAfter := executor.ParseQuotaRetryDelay(bodyBytes)
-				return nil, executor.NewStatusError(httpResp.StatusCode, string(bodyBytes), retryAfter)
+				// Extract JSON from SSE error response to avoid passing "event: error" prefix to client
+				errorMsg := extractJSONFromSSEError(bodyBytes)
+				return nil, executor.NewStatusError(httpResp.StatusCode, errorMsg, retryAfter)
 			}
 		}
 
@@ -396,6 +400,16 @@ func (e *AntigravityExecutor) Refresh(ctx context.Context, auth *provider.Auth) 
 	if auth == nil {
 		return auth, nil
 	}
+
+	e.refreshMu.Lock()
+	defer e.refreshMu.Unlock()
+
+	// Re-check expiry after acquiring lock to avoid redundant refreshes
+	expiry := executor.TokenExpiry(auth.Metadata)
+	if expiry.After(time.Now().Add(executor.TokenExpiryBuffer)) {
+		return auth, nil
+	}
+
 	updated, errRefresh := e.refreshToken(ctx, auth.Clone())
 	if errRefresh != nil {
 		return nil, errRefresh
@@ -581,6 +595,17 @@ func (e *AntigravityExecutor) refreshToken(ctx context.Context, auth *provider.A
 	}
 
 	if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
+		if httpResp.StatusCode == http.StatusBadRequest {
+			body := string(bodyBytes)
+			if strings.Contains(strings.ToLower(body), "invalid_grant") {
+				return auth, &provider.Error{
+					Code:       "refresh_token_invalid",
+					Message:    "refresh token is invalid or revoked: " + body,
+					HTTPStatus: http.StatusUnauthorized,
+					Retryable:  false,
+				}
+			}
+		}
 		return auth, executor.NewStatusError(httpResp.StatusCode, string(bodyBytes), nil)
 	}
 

@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	log "github.com/nghyane/llm-mux/internal/logging"
@@ -72,7 +73,7 @@ func AntigravityRetryConfig() RetryConfig {
 		MaxDelay:         AntigravityRetryMaxDelay,
 		FallbackDelay:    0, // No delay: sandbox/prod URLs have independent rate limits
 		RetryStatusCodes: []int{500},
-		FallbackCodes:    []int{429, 502, 503, 504},
+		FallbackCodes:    []int{http.StatusInternalServerError, 429, 502, 503, 504},
 		RetryOnErrors:    true,
 	}
 }
