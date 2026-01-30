@@ -19,7 +19,7 @@ const DefaultMaxResponseSize = 100 * 1024 * 1024 // 100MB
 const (
 	DefaultClaudeUserAgent      = "claude-cli/1.0.83 (external, cli)"
 	DefaultCodexUserAgent       = "codex_cli_rs/1.104.1 (Mac OS 26.0.1; arm64) Apple_Terminal/464"
-	DefaultAntigravityUserAgent = "antigravity/1.11.9 windows/amd64"
+	DefaultAntigravityUserAgent = "antigravity/1.15.8 Darwin/arm64"
 	DefaultQwenUserAgent        = "google-api-nodejs-client/9.15.1"
 	DefaultIFlowUserAgent       = "iFlow-Cli"
 	DefaultCopilotUserAgent     = "GithubCopilot/1.0"
