@@ -22,15 +22,12 @@ func DoAntigravityLogin(cfg *config.Config, options *LoginOptions) {
 		Prompt:    options.Prompt,
 	}
 
-	record, savedPath, err := manager.Login(context.Background(), "antigravity", cfg, authOpts)
+	record, err := manager.Login(context.Background(), "antigravity", cfg, authOpts)
 	if err != nil {
 		log.Errorf("Antigravity authentication failed: %v", err)
 		return
 	}
 
-	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
-	}
 	if record != nil && record.Label != "" {
 		fmt.Printf("Authenticated as %s\n", record.Label)
 	}

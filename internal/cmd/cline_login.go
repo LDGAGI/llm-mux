@@ -48,7 +48,7 @@ func DoClineLogin(cfg *config.Config, options *LoginOptions) {
 		Prompt:    promptFn,
 	}
 
-	_, savedPath, err := manager.Login(context.Background(), "cline", cfg, authOpts)
+	_, err := manager.Login(context.Background(), "cline", cfg, authOpts)
 	if err != nil {
 		var emailErr *login.EmailRequiredError
 		if errors.As(err, &emailErr) {
@@ -57,10 +57,6 @@ func DoClineLogin(cfg *config.Config, options *LoginOptions) {
 		}
 		fmt.Printf("Cline authentication failed: %v\n", err)
 		return
-	}
-
-	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
 	}
 
 	fmt.Println("Cline authentication successful!")

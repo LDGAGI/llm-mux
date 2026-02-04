@@ -38,22 +38,22 @@ func (m *Manager) SetStore(store provider.Store) {
 	m.store = store
 }
 
-func (m *Manager) Login(ctx context.Context, providerName string, cfg *config.Config, opts *LoginOptions) (*provider.Auth, string, error) {
+func (m *Manager) Login(ctx context.Context, providerName string, cfg *config.Config, opts *LoginOptions) (*provider.Auth, error) {
 	auth, ok := m.authenticators[providerName]
 	if !ok {
-		return nil, "", fmt.Errorf("cliproxy auth: authenticator %s not registered", providerName)
+		return nil, fmt.Errorf("cliproxy auth: authenticator %s not registered", providerName)
 	}
 
 	record, err := auth.Login(ctx, cfg, opts)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	if record == nil {
-		return nil, "", fmt.Errorf("cliproxy auth: authenticator %s returned nil record", providerName)
+		return nil, fmt.Errorf("cliproxy auth: authenticator %s returned nil record", providerName)
 	}
 
 	if m.store == nil {
-		return record, "", nil
+		return record, nil
 	}
 
 	if cfg != nil {
@@ -62,9 +62,8 @@ func (m *Manager) Login(ctx context.Context, providerName string, cfg *config.Co
 		}
 	}
 
-	savedPath, err := m.store.Save(ctx, record)
-	if err != nil {
-		return record, "", err
+	if _, err := m.store.Save(ctx, record); err != nil {
+		return record, err
 	}
-	return record, savedPath, nil
+	return record, nil
 }

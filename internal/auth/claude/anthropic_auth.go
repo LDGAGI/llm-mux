@@ -22,7 +22,7 @@ const (
 	anthropicAuthURL  = "https://claude.ai/oauth/authorize"
 	anthropicTokenURL = "https://console.anthropic.com/v1/oauth/token"
 	anthropicClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	redirectURI       = "http://localhost:54545/callback"
+	redirectURI       = "https://console.anthropic.com/oauth/code/callback"
 )
 
 // tokenResponse represents the response structure from Anthropic's OAuth token endpoint.

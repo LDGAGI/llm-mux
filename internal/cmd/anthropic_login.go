@@ -31,7 +31,7 @@ func DoClaudeLogin(cfg *config.Config, options *LoginOptions) {
 		Prompt:    options.Prompt,
 	}
 
-	_, savedPath, err := manager.Login(context.Background(), "claude", cfg, authOpts)
+	_, err := manager.Login(context.Background(), "claude", cfg, authOpts)
 	if err != nil {
 		var authErr *claude.AuthenticationError
 		if errors.As(err, &authErr) {
@@ -43,10 +43,6 @@ func DoClaudeLogin(cfg *config.Config, options *LoginOptions) {
 		}
 		fmt.Printf("Claude authentication failed: %v\n", err)
 		return
-	}
-
-	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
 	}
 
 	fmt.Println("Claude authentication successful!")

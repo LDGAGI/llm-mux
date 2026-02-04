@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/nghyane/llm-mux/internal/json"
 	"io"
 	"net/http"
 	"os"
@@ -17,12 +16,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nghyane/llm-mux/internal/json"
+
 	"github.com/nghyane/llm-mux/internal/auth/gemini"
 	"github.com/nghyane/llm-mux/internal/auth/login"
 	"github.com/nghyane/llm-mux/internal/config"
 	"github.com/nghyane/llm-mux/internal/interfaces"
-	"github.com/nghyane/llm-mux/internal/provider"
 	log "github.com/nghyane/llm-mux/internal/logging"
+	"github.com/nghyane/llm-mux/internal/provider"
 	"github.com/tidwall/gjson"
 )
 
@@ -150,14 +151,10 @@ func DoLogin(cfg *config.Config, projectID string, options *LoginOptions) {
 		setter.SetBaseDir(cfg.AuthDir)
 	}
 
-	savedPath, errSave := store.Save(ctx, record)
+	_, errSave := store.Save(ctx, record)
 	if errSave != nil {
 		log.Fatalf("Failed to save token to file: %v", errSave)
 		return
-	}
-
-	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
 	}
 
 	fmt.Println("Gemini authentication successful!")

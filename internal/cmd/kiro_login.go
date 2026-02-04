@@ -45,14 +45,10 @@ func DoKiroLogin(cfg *config.Config, options *LoginOptions) {
 		Prompt:    promptFn,
 	}
 
-	_, savedPath, err := manager.Login(context.Background(), "kiro", cfg, authOpts)
+	_, err := manager.Login(context.Background(), "kiro", cfg, authOpts)
 	if err != nil {
 		log.Errorf("Kiro authentication failed: %v", err)
 		return
-	}
-
-	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
 	}
 
 	fmt.Println("Kiro authentication successful!")

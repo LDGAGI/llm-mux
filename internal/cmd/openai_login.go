@@ -42,7 +42,7 @@ func DoCodexLogin(cfg *config.Config, options *LoginOptions) {
 		Prompt:    options.Prompt,
 	}
 
-	_, savedPath, err := manager.Login(context.Background(), "codex", cfg, authOpts)
+	_, err := manager.Login(context.Background(), "codex", cfg, authOpts)
 	if err != nil {
 		var authErr *codex.AuthenticationError
 		if errors.As(err, &authErr) {
@@ -56,8 +56,5 @@ func DoCodexLogin(cfg *config.Config, options *LoginOptions) {
 		return
 	}
 
-	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
-	}
 	fmt.Println("Codex authentication successful!")
 }
