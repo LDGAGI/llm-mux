@@ -35,7 +35,7 @@ func DoIFlowLogin(cfg *config.Config, options *LoginOptions) {
 		Prompt:    promptFn,
 	}
 
-	_, savedPath, err := manager.Login(context.Background(), "iflow", cfg, authOpts)
+	_, err := manager.Login(context.Background(), "iflow", cfg, authOpts)
 	if err != nil {
 		var emailErr *login.EmailRequiredError
 		if errors.As(err, &emailErr) {
@@ -44,10 +44,6 @@ func DoIFlowLogin(cfg *config.Config, options *LoginOptions) {
 		}
 		fmt.Printf("iFlow authentication failed: %v\n", err)
 		return
-	}
-
-	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
 	}
 
 	fmt.Println("iFlow authentication successful!")

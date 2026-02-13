@@ -2,6 +2,7 @@ package misc
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -16,8 +17,8 @@ func LogSavingCredentials(path string) {
 	if path == "" {
 		return
 	}
-	// Use filepath.Clean so logs remain stable even if callers pass redundant separators.
-	fmt.Printf("Saving credentials to %s\n", filepath.Clean(path))
+	clean := strings.Replace(filepath.Clean(path), os.Getenv("HOME"), "~", 1)
+	fmt.Printf("Saving credentials to to %s\n", clean)
 }
 
 // LogCredentialSeparator adds a visual separator to group auth/key processing logs.

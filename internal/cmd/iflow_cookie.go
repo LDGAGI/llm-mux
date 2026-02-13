@@ -61,7 +61,6 @@ func DoIFlowCookieAuth(cfg *config.Config, options *LoginOptions) {
 
 	fmt.Printf("Authentication successful! API key: %s\n", tokenData.APIKey)
 	fmt.Printf("Expires at: %s\n", tokenData.Expire)
-	fmt.Printf("Authentication saved to: %s\n", authFilePath)
 }
 
 // promptForCookie prompts the user to enter their iFlow cookie

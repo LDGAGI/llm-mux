@@ -21,14 +21,10 @@ func DoCopilotLogin(cfg *config.Config, options *LoginOptions) {
 		Metadata:  map[string]string{},
 	}
 
-	_, savedPath, err := manager.Login(context.Background(), "github-copilot", cfg, authOpts)
+	_, err := manager.Login(context.Background(), "github-copilot", cfg, authOpts)
 	if err != nil {
 		fmt.Printf("GitHub Copilot authentication failed: %v\n", err)
 		return
-	}
-
-	if savedPath != "" {
-		fmt.Printf("Authentication saved to %s\n", savedPath)
 	}
 
 	fmt.Println("GitHub Copilot authentication successful!")

@@ -139,6 +139,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *provider.Auth, req p
 	applyClaudeHeaders(httpReq, auth, apiKey, false, extraBetas)
 
 	httpClient := e.NewHTTPClient(ctx, auth, 0)
+	wrapClaudeCodeTransport(httpClient)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -242,6 +243,7 @@ func (e *ClaudeExecutor) ExecuteStream(ctx context.Context, auth *provider.Auth,
 	applyClaudeHeaders(httpReq, auth, apiKey, true, extraBetas)
 
 	httpClient := e.NewHTTPClient(ctx, auth, 0)
+	wrapClaudeCodeTransport(httpClient)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -343,6 +345,7 @@ func (e *ClaudeExecutor) CountTokens(ctx context.Context, auth *provider.Auth, r
 	applyClaudeHeaders(httpReq, auth, apiKey, false, extraBetas)
 
 	httpClient := e.NewHTTPClient(ctx, auth, 0)
+	wrapClaudeCodeTransport(httpClient)
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {

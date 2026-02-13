@@ -1,29 +1,26 @@
 package login
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/nghyane/llm-mux/internal/auth/claude"
 	"github.com/nghyane/llm-mux/internal/browser"
 	"github.com/nghyane/llm-mux/internal/config"
+	log "github.com/nghyane/llm-mux/internal/logging"
 	"github.com/nghyane/llm-mux/internal/misc"
 	"github.com/nghyane/llm-mux/internal/provider"
-	"github.com/nghyane/llm-mux/internal/util"
-	log "github.com/nghyane/llm-mux/internal/logging"
 )
 
-// ClaudeAuthenticator implements the OAuth login flow for Anthropic Claude accounts.
 type ClaudeAuthenticator struct {
-	CallbackPort int
 }
 
-// NewClaudeAuthenticator constructs a Claude authenticator with default settings.
 func NewClaudeAuthenticator() *ClaudeAuthenticator {
-	return &ClaudeAuthenticator{CallbackPort: 54545}
+	return &ClaudeAuthenticator{}
 }
 
 func (a *ClaudeAuthenticator) Provider() string {
@@ -56,66 +53,41 @@ func (a *ClaudeAuthenticator) Login(ctx context.Context, cfg *config.Config, opt
 		return nil, fmt.Errorf("claude state generation failed: %w", err)
 	}
 
-	oauthServer := claude.NewOAuthServer(a.CallbackPort)
-	if err = oauthServer.Start(); err != nil {
-		if strings.Contains(err.Error(), "already in use") {
-			return nil, claude.NewAuthenticationError(claude.ErrPortInUse, err)
-		}
-		return nil, claude.NewAuthenticationError(claude.ErrServerStartFailed, err)
-	}
-	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if stopErr := oauthServer.Stop(stopCtx); stopErr != nil {
-			log.Warnf("claude oauth server stop error: %v", stopErr)
-		}
-	}()
-
 	authSvc := claude.NewClaudeAuth(cfg)
 
 	authURL, returnedState, err := authSvc.GenerateAuthURL(state, pkceCodes)
 	if err != nil {
-		return nil, fmt.Errorf("claude authorization url generation failed: %w", err)
+		return nil, fmt.Errorf("claude authorisation url generation failed: %w", err)
 	}
 	state = returnedState
 
 	if !opts.NoBrowser {
-		fmt.Println("Opening browser for Claude authentication")
-		if !browser.IsAvailable() {
-			log.Warn("No browser available; please open the URL manually")
-			util.PrintSSHTunnelInstructions(a.CallbackPort)
-			fmt.Printf("Visit the following URL to continue authentication:\n%s\n", authURL)
-		} else if err = browser.OpenURL(authURL); err != nil {
-			log.Warnf("Failed to open browser automatically: %v", err)
-			util.PrintSSHTunnelInstructions(a.CallbackPort)
-			fmt.Printf("Visit the following URL to continue authentication:\n%s\n", authURL)
+		if browser.IsAvailable() {
+			fmt.Println("Opening browser for Claude authentication...")
+			if err = browser.OpenURL(authURL); err != nil {
+				log.Warnf("Failed to open browser automatically: %v", err)
+			}
 		}
-	} else {
-		util.PrintSSHTunnelInstructions(a.CallbackPort)
-		fmt.Printf("Visit the following URL to continue authentication:\n%s\n", authURL)
 	}
 
-	fmt.Println("Waiting for Claude authentication callback...")
+	fmt.Printf("Visit the following URL to authenticate:\n%s\n\n", authURL)
+	fmt.Print("Paste the authorisation code from the browser: ")
 
-	result, err := oauthServer.WaitForCallback(5 * time.Minute)
-	if err != nil {
-		if strings.Contains(err.Error(), "timeout") {
-			return nil, claude.NewAuthenticationError(claude.ErrCallbackTimeout, err)
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("failed to read authorisation code: %w", err)
 		}
-		return nil, err
+		return nil, fmt.Errorf("no authorisation code provided")
+	}
+	code := strings.TrimSpace(scanner.Text())
+	if code == "" {
+		return nil, fmt.Errorf("empty authorisation code provided")
 	}
 
-	if result.Error != "" {
-		return nil, claude.NewOAuthError(result.Error, "", http.StatusBadRequest)
-	}
+	log.Debug("Claude authorisation code received; exchanging for tokens")
 
-	if result.State != state {
-		return nil, claude.NewAuthenticationError(claude.ErrInvalidState, fmt.Errorf("state mismatch"))
-	}
-
-	log.Debug("Claude authorization code received; exchanging for tokens")
-
-	authBundle, err := authSvc.ExchangeCodeForTokens(ctx, result.Code, state, pkceCodes)
+	authBundle, err := authSvc.ExchangeCodeForTokens(ctx, code, state, pkceCodes)
 	if err != nil {
 		return nil, claude.NewAuthenticationError(claude.ErrCodeExchangeFailed, err)
 	}
@@ -131,7 +103,6 @@ func (a *ClaudeAuthenticator) Login(ctx context.Context, cfg *config.Config, opt
 		"email": tokenStorage.Email,
 	}
 
-	fmt.Println("Claude authentication successful")
 	if authBundle.APIKey != "" {
 		fmt.Println("Claude API key obtained and stored")
 	}
